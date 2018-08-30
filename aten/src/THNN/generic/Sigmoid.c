@@ -24,39 +24,29 @@ void THNN_(Sigmoid_updateGradInput)(
   int serial_path = 0;
 #ifdef _OPENMP
   int inOMP = omp_in_parallel();
-  if (inOMP) {
+  if (inOMP)
+  {
     serial_path = 1;
-  } else {
+  }
+  else
+  {
     int64_t gradInput_size = THTensor_(nElement)(gradInput);
     int gradInput_contig = THTensor_(isContiguous)(gradInput);
     int gradOutput_contig = THTensor_(isContiguous)(gradOutput);
     int output_contig = THTensor_(isContiguous)(output);
-    TH_TENSOR_APPLY3_OMP(gradInput_size,
-      gradInput_contig,
-      gradOutput_contig,
-      output_contig,
-      real,
-      gradInput,
-      real,
-      gradOutput,
-      real,
-      output,
-      real z = *output_data;
+    TH_TENSOR_APPLY3_OMP(gradInput_size, gradInput_contig, gradOutput_contig, output_contig, scalar_t, gradInput, scalar_t, gradOutput, scalar_t, output,
+      scalar_t z = *output_data;
       *gradInput_data = *gradOutput_data * (1. - z) * z;,
       THNN_OMP_OVERHEAD_THRESHOLD);
   }
 #else
   serial_path = 1;
 #endif
-  if (serial_path) {
-    TH_TENSOR_APPLY3(
-      real,
-      gradInput,
-      real,
-      gradOutput,
-      real,
-      output,
-      real z = *output_data; *gradInput_data = *gradOutput_data * (1. - z) * z;
+  if (serial_path)
+  {
+    TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, gradOutput, scalar_t, output,
+      scalar_t z = *output_data;
+      *gradInput_data = *gradOutput_data * (1. - z) * z;
     );
   }
 }

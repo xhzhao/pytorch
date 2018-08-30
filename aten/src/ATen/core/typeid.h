@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <complex>
 #ifdef __GXX_RTTI
 #include <typeinfo>
 #endif
@@ -30,12 +31,6 @@
 // is not fixed at the moment.
 
 namespace caffe2 {
-class TypeIdentifier;
-}
-
-std::ostream& operator<<(std::ostream& stream, caffe2::TypeIdentifier typeId);
-
-namespace caffe2 {
 
 class TypeMeta;
 
@@ -49,7 +44,7 @@ class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, ui
  public:
   static TypeIdentifier createTypeId();
 
-  friend std::ostream& ::operator<<(
+  friend std::ostream& operator<<(
       std::ostream& stream,
       TypeIdentifier typeId);
   friend bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
@@ -70,15 +65,19 @@ inline bool operator<(TypeIdentifier lhs, TypeIdentifier rhs) {
   return lhs.underlyingId() < rhs.underlyingId();
 }
 
-} // namespace caffe2
-
-AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
-
 inline std::ostream& operator<<(
     std::ostream& stream,
     caffe2::TypeIdentifier typeId) {
   return stream << typeId.underlyingId();
 }
+
+} // namespace caffe2
+
+namespace at {
+using DataType = caffe2::TypeIdentifier;
+}
+
+AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
 
 namespace caffe2 {
 
@@ -406,7 +405,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #ifdef _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  AT_CORE_API TypeIdentifier TypeMeta::Id<T>() {                          \
+  AT_CORE_EXPORT TypeIdentifier TypeMeta::Id<T>() {                       \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     static TypeNameRegisterer<T> registerer(type_id, #T);                 \
     return type_id;                                                       \
@@ -468,26 +467,29 @@ CAFFE_DECLARE_KNOWN_TYPE(4, int64_t)
 CAFFE_DECLARE_KNOWN_TYPE(5, at::Half)
 CAFFE_DECLARE_KNOWN_TYPE(6, float)
 CAFFE_DECLARE_KNOWN_TYPE(7, double)
-// 8 = undefined type id
+CAFFE_DECLARE_KNOWN_TYPE(8, at::ComplexHalf)
+CAFFE_DECLARE_KNOWN_TYPE(9, std::complex<float>)
+CAFFE_DECLARE_KNOWN_TYPE(10, std::complex<double>)
+// 10 = undefined type id
 
-CAFFE_DECLARE_KNOWN_TYPE(9, Tensor)
-CAFFE_DECLARE_KNOWN_TYPE(10, std::string)
-CAFFE_DECLARE_KNOWN_TYPE(11, bool)
-CAFFE_DECLARE_KNOWN_TYPE(12, uint16_t)
-CAFFE_DECLARE_KNOWN_TYPE(13, char)
-CAFFE_DECLARE_KNOWN_TYPE(14, std::unique_ptr<std::mutex>)
-CAFFE_DECLARE_KNOWN_TYPE(15, std::unique_ptr<std::atomic<bool>>)
-CAFFE_DECLARE_KNOWN_TYPE(16, std::vector<int32_t>)
-CAFFE_DECLARE_KNOWN_TYPE(17, std::vector<int64_t>)
-CAFFE_DECLARE_KNOWN_TYPE(18, std::vector<unsigned long>)
-CAFFE_DECLARE_KNOWN_TYPE(19, bool*)
-CAFFE_DECLARE_KNOWN_TYPE(20, char*)
-CAFFE_DECLARE_KNOWN_TYPE(21, int*)
+CAFFE_DECLARE_KNOWN_TYPE(12, Tensor)
+CAFFE_DECLARE_KNOWN_TYPE(13, std::string)
+CAFFE_DECLARE_KNOWN_TYPE(14, bool)
+CAFFE_DECLARE_KNOWN_TYPE(15, uint16_t)
+CAFFE_DECLARE_KNOWN_TYPE(16, char)
+CAFFE_DECLARE_KNOWN_TYPE(17, std::unique_ptr<std::mutex>)
+CAFFE_DECLARE_KNOWN_TYPE(18, std::unique_ptr<std::atomic<bool>>)
+CAFFE_DECLARE_KNOWN_TYPE(19, std::vector<int32_t>)
+CAFFE_DECLARE_KNOWN_TYPE(20, std::vector<int64_t>)
+CAFFE_DECLARE_KNOWN_TYPE(21, std::vector<unsigned long>)
+CAFFE_DECLARE_KNOWN_TYPE(22, bool*)
+CAFFE_DECLARE_KNOWN_TYPE(23, char*)
+CAFFE_DECLARE_KNOWN_TYPE(24, int*)
 
 #ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
-CAFFE_DECLARE_KNOWN_TYPE(22, long)
-CAFFE_DECLARE_KNOWN_TYPE(23, std::vector<long>)
+CAFFE_DECLARE_KNOWN_TYPE(25, long)
+CAFFE_DECLARE_KNOWN_TYPE(26, std::vector<long>)
 #endif // CAFFE2_UNIQUE_LONG_TYPEMETA
 
-CAFFE_DECLARE_KNOWN_TYPE(24, _CaffeHighestPreallocatedTypeId)
+CAFFE_DECLARE_KNOWN_TYPE(27, _CaffeHighestPreallocatedTypeId)
 } // namespace caffe2

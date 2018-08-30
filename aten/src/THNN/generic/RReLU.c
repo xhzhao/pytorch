@@ -16,45 +16,61 @@ void THNN_(RReLU_updateOutput)(
           bool inplace,
           THGenerator *generator)
 {
-  real lower = TH_CONVERT_ACCREAL_TO_REAL(lower_);
-  real upper = TH_CONVERT_ACCREAL_TO_REAL(upper_);
-  if (train) {
+  scalar_t lower = TH_CONVERT_ACCREAL_TO_REAL(lower_);
+  scalar_t upper = TH_CONVERT_ACCREAL_TO_REAL(upper_);
+  if (train)
+  {
     // get default random generator
     THTensor_(resizeAs)(noise, input);
-    if (inplace) {
-      TH_TENSOR_APPLY2(real, input, real, noise,
-        if (*input_data <= 0) {
-          const real r = (real)THRandom_uniform(generator, lower, upper);
+    if (inplace)
+    {
+      TH_TENSOR_APPLY2(scalar_t, input, scalar_t, noise,
+        if (*input_data <= 0)
+        {
+          const scalar_t r = (scalar_t)THRandom_uniform(generator, lower, upper);
           *input_data = (*input_data) * r;
           *noise_data = r;
-        } else {
+        }
+        else
+        {
           *noise_data = 1;
         }
       );
       THTensor_(set)(output, input);
-    } else {
+    }
+    else
+    {
       THTensor_(resizeAs)(output, input);
-      TH_TENSOR_APPLY3(real, input, real, output, real, noise,
-        if (*input_data <= 0) {
-          const real r = (real)THRandom_uniform(generator, lower, upper);
+      TH_TENSOR_APPLY3(scalar_t, input, scalar_t, output, scalar_t, noise,
+        if (*input_data <= 0)
+        {
+          const scalar_t r = (scalar_t)THRandom_uniform(generator, lower, upper);
           *output_data = (*input_data) * r;
           *noise_data = r;
-        } else {
+        } 
+        else
+        {
           *output_data = *input_data;
           *noise_data = 1;
         }
       );
     }
-  } else {
-    const real negSlope = (lower + upper) / 2;
-    if (inplace) {
+  }
+  else
+  {
+    const scalar_t negSlope = (lower + upper) / 2;
+    if (inplace)
+    {
       int serial_path = 0;
 #ifdef _OPENMP
       int inOMP = omp_in_parallel();
-      if (inOMP) {
+      if (inOMP)
+      {
         serial_path = 1;
-      } else {
-        TH_TENSOR_APPLY_OMP(real, input,
+      }
+      else
+      {
+        TH_TENSOR_APPLY_OMP(scalar_t, input,
           if ((*input_data) <= 0)
             *input_data = *input_data * negSlope;,
           THNN_OMP_OVERHEAD_THRESHOLD
@@ -63,32 +79,34 @@ void THNN_(RReLU_updateOutput)(
 #else
       serial_path = 1;
 #endif
-      if (serial_path){
-        TH_TENSOR_APPLY(real, input,
+      if (serial_path)
+      {
+        TH_TENSOR_APPLY(scalar_t, input,
           if (*input_data <= 0)
+          {
             *input_data = *input_data * negSlope;
+          }
         );
       }
       THTensor_(set)(output, input);
-    } else {
+    }
+    else
+    {
       THTensor_(resizeAs)(output, input);
       int serial_path = 0;
 #ifdef _OPENMP
       int inOMP = omp_in_parallel();
-      if (inOMP) {
+      if (inOMP)
+      {
         serial_path = 1;
-      } else {
+      }
+      else
+      {
         int64_t input_size = THTensor_(nElement)(input);
         int input_contig = THTensor_(isContiguous)(input);
         int output_contig = THTensor_(isContiguous)(output);
-        TH_TENSOR_APPLY2_OMP(input_size,
-          input_contig,
-          output_contig,
-          real,
-          input,
-          real,
-          output,
-          const real r = (*input_data) <= 0 ? negSlope : 1;
+        TH_TENSOR_APPLY2_OMP(input_size, input_contig, output_contig, scalar_t, input, scalar_t, output,
+          const scalar_t r = (*input_data) <= 0 ? negSlope : 1;
           *output_data = *input_data * r;,
           THNN_OMP_OVERHEAD_THRESHOLD
         );
@@ -96,12 +114,10 @@ void THNN_(RReLU_updateOutput)(
 #else
       serial_path = 1;
 #endif
-      if (serial_path) {
-        TH_TENSOR_APPLY2(real,
-          input,
-          real,
-          output,
-          const real r = (*input_data) <= 0 ? negSlope : 1;
+      if (serial_path)
+      {
+        TH_TENSOR_APPLY2(scalar_t, input, scalar_t, output,
+          const scalar_t r = (*input_data) <= 0 ? negSlope : 1;
           *output_data = *input_data * r;
         );
       }
@@ -120,8 +136,8 @@ void THNN_(RReLU_updateGradInput)(
           bool train,
           bool inplace)
 {
-  real lower = TH_CONVERT_ACCREAL_TO_REAL(lower_);
-  real upper = TH_CONVERT_ACCREAL_TO_REAL(upper_);
+  scalar_t lower = TH_CONVERT_ACCREAL_TO_REAL(lower_);
+  scalar_t upper = TH_CONVERT_ACCREAL_TO_REAL(upper_);
   THNN_CHECK_NELEMENT(input, gradOutput);
   if (train && upper - lower > 1E-6)    // e.g. if upper == lower, RReLU behaves like LeakyReLU
   {
@@ -137,25 +153,22 @@ void THNN_(RReLU_updateGradInput)(
   else
   {
     // use constant factor for negative input values
-    const real negSlope = (lower + upper) / 2;
-    if (inplace) {
+    const scalar_t negSlope = (lower + upper) / 2;
+    if (inplace)
+    {
       int serial_path = 0;
 #ifdef _OPENMP
       int inOMP = omp_in_parallel();
-      if (inOMP) {
+      if (inOMP)
+      {
         serial_path = 1;
-      } else {
+      }
+      else
+      {
         int64_t gradOutput_size = THTensor_(nElement)(gradOutput);
         int gradOutput_contig = THTensor_(isContiguous)(gradOutput);
         int input_contig = THTensor_(isContiguous)(input);
-        TH_TENSOR_APPLY2_OMP(
-          gradOutput_size,
-          gradOutput_contig,
-          input_contig,
-          real,
-          gradOutput,
-          real,
-          input,
+        TH_TENSOR_APPLY2_OMP(gradOutput_size, gradOutput_contig, input_contig, scalar_t, gradOutput, scalar_t, input,
           if (*input_data <= 0)
             *gradOutput_data = (*gradOutput_data) * negSlope;,
           THNN_OMP_OVERHEAD_THRESHOLD);
@@ -163,14 +176,14 @@ void THNN_(RReLU_updateGradInput)(
 #else
       serial_path = 1;
 #endif
-      if (serial_path) {
-        TH_TENSOR_APPLY2(
-          real,
-          gradOutput,
-          real,
-          input,
+      if (serial_path)
+      {
+        TH_TENSOR_APPLY2(scalar_t, gradOutput, scalar_t, input,
           if (*input_data <= 0)
-            *gradOutput_data = (*gradOutput_data) * negSlope;);
+          {
+            *gradOutput_data = (*gradOutput_data) * negSlope;
+          }
+        );
       }
       THTensor_(set)(gradInput, gradOutput);
     }
@@ -180,23 +193,17 @@ void THNN_(RReLU_updateGradInput)(
       int serial_path = 0;
 #ifdef _OPENMP
       int inOMP = omp_in_parallel();
-      if (inOMP) {
+      if (inOMP)
+      {
         serial_path = 1;
-      } else {
+      }
+      else
+      {
         int64_t gradInput_size = THTensor_(nElement)(gradInput);
         int gradInput_contig = THTensor_(isContiguous)(gradInput);
         int gradOutput_contig = THTensor_(isContiguous)(gradOutput);
         int input_contig = THTensor_(isContiguous)(input);
-        TH_TENSOR_APPLY3_OMP(gradInput_size,
-          gradInput_contig,
-          gradOutput_contig,
-          input_contig,
-          real,
-          gradInput,
-          real,
-          gradOutput,
-          real,
-          input,
+        TH_TENSOR_APPLY3_OMP(gradInput_size, gradInput_contig, gradOutput_contig, input_contig, scalar_t, gradInput, scalar_t, gradOutput, scalar_t, input,
           *gradInput_data = (*input_data) <= 0 ? (*gradOutput_data) * negSlope : (*gradOutput_data);,
           THNN_OMP_OVERHEAD_THRESHOLD
         );
@@ -204,13 +211,9 @@ void THNN_(RReLU_updateGradInput)(
 #else
       serial_path = 1;
 #endif
-      if (serial_path) {
-        TH_TENSOR_APPLY3(real,
-          gradInput,
-          real,
-          gradOutput,
-          real,
-          input,
+      if (serial_path)
+      {
+        TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, gradOutput, scalar_t, input,
           *gradInput_data = (*input_data) <= 0 ? (*gradOutput_data) * negSlope : (*gradOutput_data);
         );
       }
