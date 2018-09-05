@@ -1,3 +1,6 @@
+#ifndef THNN_OMP_OVERHEAD_THRESHOLD
+#define THNN_OMP_OVERHEAD_THRESHOLD 5000
+#endif
 #ifndef TH_GENERIC_FILE
 #define TH_GENERIC_FILE "generic/PReLU.c"
 #else
@@ -10,15 +13,42 @@ void THNN_(PReLU_updateOutput)(
 {
   THTensor_(resizeAs)(output, input);
   int64_t nOutputPlane = THTensor_(numel)(weight);
-
   if (nOutputPlane == 1)
   {
     // handle shared parameter case
     real w = *THTensor_(data)(weight);
-    TH_TENSOR_APPLY2(real, output, real, input,
-          const real r = (*input_data > 0) ? 1 : w;
-          *output_data = *input_data * r;
-    );
+    int serial_path = 0;
+#ifdef _OPENMP
+    int inOMP = omp_in_parallel();
+    if (inOMP) {
+      serial_path = 1;
+    } else {
+      int64_t output_size = THTensor_(nElement)(output);
+      int output_contig = THTensor_(isContiguous)(output);
+      int input_contig = THTensor_(isContiguous)(input);
+      TH_TENSOR_APPLY2_OMP(
+        output_size,
+        output_contig,
+        input_contig,
+        real,
+        output,
+        real,
+        input,
+        *output_data = (*input_data > 0) ? *input_data : w * (*input_data);,
+        THNN_OMP_OVERHEAD_THRESHOLD
+      );
+    }
+#else
+    serial_path = 1;
+#endif
+    if (serial_path) {
+      TH_TENSOR_APPLY2(
+        real,
+        output,
+        real,
+        input,
+        *output_data = (*input_data > 0) ? *input_data : w * (*input_data););
+    }
     return;
   }
 
@@ -30,10 +60,10 @@ void THNN_(PReLU_updateOutput)(
       THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, THTensor_sizeLegacyNoScalars(input, input_ndim > 1));
 
     if (input_ndim > 1) {
-        bs = input->size(0);
-        for (int d = 2; d < input_ndim; d++) {
-            ks *= input->size(d);
-        }
+      bs = input->size(0);
+      for (int d = 2; d < input_ndim; d++) {
+        ks *= input->size(d);
+      }
     }
   }
 
@@ -71,12 +101,50 @@ void THNN_(PReLU_updateGradInput)(
   if (nOutputPlane == 1)
   {
     real w = THTensor_(data)(weight)[0];
-    TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
-       if ((*input_data) > 0)
-         *gradInput_data = *gradOutput_data;
-       else
-         *gradInput_data = w * (*gradOutput_data);
-    );
+    int serial_path = 0;
+#ifdef _OPENMP
+    int inOMP = omp_in_parallel();
+    if (inOMP) {
+      serial_path = 1;
+    } else {
+      int64_t gradInput_size = THTensor_(nElement)(gradInput);
+      int gradInput_contig = THTensor_(isContiguous)(gradInput);
+      int gradOutput_contig = THTensor_(isContiguous)(gradOutput);
+      int input_contig = THTensor_(isContiguous)(input);
+      TH_TENSOR_APPLY3_OMP(
+        gradInput_size,
+        gradInput_contig,
+        gradOutput_contig,
+        input_contig,
+        real,
+        gradInput,
+        real,
+        gradOutput,
+        real,
+        input,
+        if ((*input_data) > 0)
+          *gradInput_data = *gradOutput_data;
+        else
+          *gradInput_data = w * (*gradOutput_data);,
+        THNN_OMP_OVERHEAD_THRESHOLD);
+    }
+#else
+    serial_path = 1;
+#endif
+    if (serial_path) {
+      TH_TENSOR_APPLY3(
+        real,
+        gradInput,
+        real,
+        gradOutput,
+        real,
+        input,
+        if ((*input_data) > 0)
+          *gradInput_data = *gradOutput_data;
+        else
+          *gradInput_data = w * (*gradOutput_data);
+      );
+    }
     return;
   }
 
@@ -95,10 +163,10 @@ void THNN_(PReLU_updateGradInput)(
       THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, THTensor_sizeLegacyNoScalars(input, input_ndim > 1));
 
     if (input_ndim > 1) {
-        bs = input->size(0);
-        for (int d = 2; d < input_ndim; d++) {
-            ks *= input->size(d);
-        }
+      bs = input->size(0);
+      for (int d = 2; d < input_ndim; d++) {
+        ks *= input->size(d);
+      }
     }
   }
 
@@ -166,10 +234,10 @@ void THNN_(PReLU_accGradParameters)(
       THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, THTensor_sizeLegacyNoScalars(input, input_ndim > 1));
 
     if (input_ndim > 1) {
-        bs = input->size(0);
-        for (int d = 2; d < input_ndim; d++) {
-          ks *= input->size(d);
-        }
+      bs = input->size(0);
+      for (int d = 2; d < input_ndim; d++) {
+        ks *= input->size(d);
+      }
     }
   }
 
@@ -199,4 +267,5 @@ void THNN_(PReLU_accGradParameters)(
   THTensor_(free)(weight);
 }
 
+#undef THNN_OMP_OVERHEAD_THRESHOLD
 #endif
