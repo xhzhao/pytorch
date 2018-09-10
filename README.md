@@ -208,6 +208,29 @@ call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
 python setup.py install
 ```
 
+### BKM on Xeon
+By default, PyTorch will find any available MPI library during installation. 
+In order to compile against Intel MPI, add corresponding environment variables before installation.
+```bash
+source /opt/intel/compilers_and_libraries/linux/mpi/bin64/mpivars.sh
+```
+PyTorch spawns different sets of OpenMP threads for forward path and backward path, so addtional control over OpenMP is needed to run CPU effcienctly. Set `OMP_NUM_THREADS` to be the number of physical cores. Take Xeon Skylake 8180 as an example, the machine has 2 sockets with 28 cores per socket.
+```bash
+# for Xeon Skylake 8180
+export OMP_NUM_THREADS=56
+export KMP_BLOCKTIME=1
+export KMP_AFFINITY=granularity=fine,compact,1,0
+```
+Currently, we use the following benchmarks for tracking CNN and RNN performance, data on Xeon Skylake 8180 is also available.
+* [convnet-benchmarks](https://github.com/mingfeima/convnet-benchmarks)
+* [DeepSpeech2](https://github.com/mingfeima/deepspeech.pytorch)
+* [OpenNMT](https://github.com/mingfeima/OpenNMT-py)
+
+For more information such as performance data, release plan, please visit [IntelPyTorchWiki](https://wiki.ith.intel.com/display/DL/Intel+PyTorch)
+
+Please note that the optimization is still working in progress so current benchmark performance is suboptimal.
+Contact [Ma Mingfei](mingfei.ma@intel.com) if have any issues with Intel-PyTorch.
+
 ### Docker image
 
 Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass -e PYTHON_VERSION=x.y flag to specificy which python to be used by Miniconda, or leave it unset to use the default. Build as usual
