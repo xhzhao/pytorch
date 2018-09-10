@@ -52,7 +52,7 @@ class Threshold(Module):
         )
 
 
-class ReLU(Threshold):
+class ReLU(Module):
     r"""Applies the rectified linear unit function element-wise
     :math:`\text{ReLU}(x)= \max(0, x)`
 
@@ -74,7 +74,11 @@ class ReLU(Threshold):
     """
 
     def __init__(self, inplace=False):
-        super(ReLU, self).__init__(0, 0, inplace)
+        super(ReLU, self).__init__()
+        self.inplace = inplace
+
+    def forward(self, input):
+        return F.relu(input, self.inplace)
 
     def extra_repr(self):
         inplace_str = 'inplace' if self.inplace else ''

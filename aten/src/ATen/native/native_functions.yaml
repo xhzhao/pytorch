@@ -1124,6 +1124,15 @@
 - func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
   variants: function
 
+- func: mkldnn_relu(Tensor self, double negative_slope) -> Tensor
+  variants: function
+
+- func: mkldnn_relu_(Tensor self, double negative_slope) -> Tensor
+  variants: function
+
+- func: mkldnn_relu_backward(Tensor self, Tensor grad_output, double negative_slope) -> Tensor
+  variants: function
+
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double exponential_average_factor, double epsilon) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
