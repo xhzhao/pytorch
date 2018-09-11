@@ -819,9 +819,6 @@
 - name: soft_margin_loss_forward(Tensor self, Tensor target, int64_t reduction)
   self: soft_margin_loss_backward(grad, self, target, reduction)
 
-- name: relu(Tensor self)
-  self: threshold_backward(grad, self, 0, 0)
-
 - name: elu_forward(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale)
   self: elu_backward(grad, alpha, scale, input_scale, output)
 
@@ -1242,6 +1239,12 @@
 # mkldnn
 - name: mkldnn_convolution(Tensor self, Tensor weight, Tensor bias, IntList padding, IntList stride, IntList dilation, int64_t groups)
   self, weight, bias: mkldnn_convolution_backward(self, grad, weight, padding, stride, dilation, groups, grad_input_mask)
+
+- name: mkldnn_relu(Tensor self, double negative_slope)
+  self: mkldnn_relu_backward(self, grad, negative_slope)
+
+- name: mkldnn_relu_(Tensor self, double negative_slope)
+  self: mkldnn_relu_backward(output, grad, negative_slope)
 
 # fft
 - name: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes)
