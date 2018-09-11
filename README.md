@@ -177,7 +177,7 @@ conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
 ```
 #### Get the PyTorch source
 ```bash
-git clone --recursive https://github.com/pytorch/pytorch
+git clone --recursive https://github.com/intel/pytorch
 cd pytorch
 ```
 
