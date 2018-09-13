@@ -155,6 +155,8 @@ The details of the patch can be found out [here](https://support.microsoft.com/e
 
 On Linux
 ```bash
+# In case using conda virtual environment, point this to corresponding virtual env directory
+# e.g. export CMAKE_PREFIX_PATH=/home/user/anaconda/env/virtual_env_name/
 export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
 
 # Install basic dependencies
@@ -207,6 +209,17 @@ set PREBUILD_COMMAND_ARGS=x64
 call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
 python setup.py install
 ```
+### Intel Optimization
+**NOTE**: Currently, PyTorch can be installed via different channels, such as *conda*, *pip* and *docker*. Binary distribution is not enabled with MKLDNN at the moment. To get MKLDNN enabled version, build from source following [Installation](https://github.com/intel/pytorch#installation) above.
+
+Optimization project is model driven, the current focus is **OpenNMT**, **DeepSpeech2**, **ResNet50**.
+
+Master branch doesn't have *icc* support at the moment, *icc* support is working in progress.
+
+For more information such as performance data, release plan, please visit [IntelPyTorchWiki](https://wiki.ith.intel.com/display/DL/Intel+PyTorch)
+
+Please note that the optimization is still working in progress so current benchmark performance is suboptimal.
+Contact [Ma Mingfei](mingfei.ma@intel.com) if have any issues with Intel-PyTorch.
 
 ### BKM on Xeon
 By default, PyTorch will find any available MPI library during installation. 
@@ -225,11 +238,6 @@ Currently, we use the following benchmarks for tracking CNN and RNN performance,
 * [convnet-benchmarks](https://github.com/mingfeima/convnet-benchmarks)
 * [DeepSpeech2](https://github.com/mingfeima/deepspeech.pytorch)
 * [OpenNMT](https://github.com/mingfeima/OpenNMT-py)
-
-For more information such as performance data, release plan, please visit [IntelPyTorchWiki](https://wiki.ith.intel.com/display/DL/Intel+PyTorch)
-
-Please note that the optimization is still working in progress so current benchmark performance is suboptimal.
-Contact [Ma Mingfei](mingfei.ma@intel.com) if have any issues with Intel-PyTorch.
 
 ### Docker image
 
