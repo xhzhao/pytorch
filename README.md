@@ -210,11 +210,16 @@ call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
 python setup.py install
 ```
 ### Intel Optimization
-**NOTE**: Currently, PyTorch can be installed via different channels, such as *conda*, *pip* and *docker*. Binary distribution is not enabled with MKLDNN at the moment. To get MKLDNN enabled version, build from source following [Installation](https://github.com/intel/pytorch#installation) above.
+**Installation**: Currently, PyTorch can be installed via different channels, such as *conda*, *pip* and *docker*. Binary distribution is not enabled with MKLDNN at the moment. To get MKLDNN enabled version, build from source following [Installation](https://github.com/intel/pytorch#installation) above.
 
-Optimization project is model driven, the current focus is **OpenNMT**, **DeepSpeech2**, **ResNet50**.
+**Schedule**: Optimization project is model driven, the current focus is **OpenNMT**, **DeepSpeech2**, **ResNet50**.
 
-Master branch doesn't have *icc* support at the moment, *icc* support is working in progress.
+**torchvision**: install torchvision from conda would pre-install pytorch from conda, so need to install torchvision from pip in case pytorch is installed from source code build.
+```python
+pip install torchvision
+```
+
+**ICC**: Master branch doesn't have *icc* support at the moment, *icc* support is working in progress.
 
 For more information such as performance data, release plan, please visit [IntelPyTorchWiki](https://wiki.ith.intel.com/display/DL/Intel+PyTorch)
 
