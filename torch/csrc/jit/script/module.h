@@ -112,7 +112,8 @@ struct Method {
     for (at::Tensor* inp : member_inputs) {
       stack.push_back(*inp);
     }
-    PropagateInputShapes(*retval, ArgumentSpec(with_grad, std::move(stack)));
+    setInputTypes(*retval, ArgumentSpec(with_grad, std::move(stack), stack.size()));
+    PropagateInputShapes(*retval);
     return retval;
   }
 
@@ -122,7 +123,8 @@ struct Method {
       inputs.push_back(*inp);
     }
     if (propagate) {
-      PropagateInputShapes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs)));
+      setInputTypes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+      PropagateInputShapes(*retval);
     }
     JIT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i=0; i < retval->inputs().size(); ++i) {
@@ -350,6 +352,24 @@ struct Module {
       return pm->get();
     }
     return nullptr;
+  }
+
+  /// Run a method from this module.
+  ///
+  /// For example:
+  /// @code
+  ///   IValue output = module->run("relu_script", a, b);
+  /// @endcode
+  ///
+  /// To get a compile a module from a source string, see torch::jit::compile
+  ///
+  /// @param method_name The name of the method to run
+  /// @param args Arguments to be passed to the method
+  /// @return An IValue containing the return value (or values if it is a tuple)
+  /// from the method
+  template <typename... Types>
+  IValue run_method(const std::string& method_name, Types&&... args) {
+    return get_method(method_name)({IValue(std::forward<Types>(args))...});
   }
 
   void save(const std::string& filename);

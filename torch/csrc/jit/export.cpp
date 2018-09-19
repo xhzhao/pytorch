@@ -1,11 +1,12 @@
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/serialization.h"
 #include "torch/csrc/autograd/symbolic.h"
-#include "onnx/onnx.pb.h"
+#include "onnx/onnx_pb.h"
 #include "torch/csrc/onnx/onnx.h"
 
 #include "torch/csrc/utils/functional.h"
 #include <torch/csrc/jit/assertions.h>
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 #include <ATen/ATen.h>
 #include <ATen/core/optional.h>
@@ -43,11 +44,14 @@ std::string getNodeStackTraceString(const Node* n) {
   return ss.str();
 }
 
-void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExportTypes operator_export_type) {
-  for (auto node : graph->nodes()) {
-      // Macro'ed so we get a marginally better line number on failed export
+void validateBlock(Block *b, onnx_torch::OperatorExportTypes operator_export_type) {
+  for (auto node : b->nodes()) {
+    for (Block *sub_block : node->blocks()) {
+      validateBlock(sub_block, operator_export_type);
+    }
+    // Macro'ed so we get a marginally better line number on failed export
 #define FAIL_EXPORT(name) \
-      throw std::runtime_error(std::string("ONNX export failed: ") + name + "\n\nGraph we tried to export:\n" + graph->toString());
+      throw std::runtime_error(std::string("ONNX export failed: ") + name + "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
     IR_IF(node, PythonOp)
       auto py_node = static_cast<torch::jit::PythonOp*>(value);
       FAIL_EXPORT(
@@ -56,9 +60,19 @@ void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExpo
     IR_ELSE()
       // Special error messages for certain types of operators
       if (node->kind() == aten::expand) {
-        FAIL_EXPORT(
-            "Could not export a broadcasted operation; ONNX likely does not support this form of broadcasting.\n\nBroadcast occurred at:\n" +
-            getNodeStackTraceString(node));
+        if (operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
+          WithInsertPoint guard(node);
+          auto* new_node = b->owningGraph()->insertNode(
+            b->owningGraph()->create(Symbol(::torch::jit::onnx::ATen), node->inputs(), node->outputs().size()));
+          for (size_t i = 0; i < node->outputs().size(); ++i) {
+            node->output(i)->replaceAllUsesWith(new_node->output(i));
+          }
+          new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
+        } else {
+          FAIL_EXPORT(
+              "Could not export a broadcasted operation; ONNX likely does not support this form of broadcasting.\n\nBroadcast occurred at:\n" +
+              getNodeStackTraceString(node));
+        }
       }
       if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
         FAIL_EXPORT(
@@ -74,6 +88,11 @@ void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExpo
     IR_END()
 #undef FAIL_EXPORT
   }
+}
+
+void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExportTypes operator_export_type) {
+  validateBlock(graph->block(), operator_export_type);
+  EliminateDeadCode(graph);
 }
 
 class EncoderBase {
@@ -160,6 +179,8 @@ void EncoderBase::EncodeValueInfo(
       shape->mutable_dim(i)->set_dim_value(sizes[i]);
     }
     tensor_type->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
+  } else {
+    tensor_type->set_elem_type(onnx::TensorProto_DataType_UNDEFINED);
   }
 }
 
@@ -481,6 +502,7 @@ void ModuleEncoder::EncodeTypeInfo(
   auto kind = type->kind();
   if (kind == TypeKind::DynamicType) {
     type_proto->set_denotation("DynamicType");
+    tensortype_proto->set_elem_type(onnx::TensorProto_DataType_UNDEFINED);
   } else if (kind == TypeKind::TensorType) {
     type_proto->set_denotation("TensorType");
     // encode the number of dimensions by pushing that number of ones into the shape proto
@@ -538,8 +560,11 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("IntType");
   } else if (kind == TypeKind::NoneType) {
     type_proto->set_denotation("NoneType");
-  }
-  else {
+  } else if (kind == TypeKind::GeneratorType) {
+    type_proto->set_denotation("GeneratorType");
+  } else if (kind == TypeKind::StringType) {
+    type_proto->set_denotation("StringType");
+  } else {
     throw std::runtime_error("unexpected type kind");
   }
 }
@@ -656,7 +681,7 @@ void ModuleEncoder::EncodeTensor(
       // NB: This new tensor is created to support cuda tensors.
       // Storages can be mutated when converting tensors from cuda to cpu,
       // and we need a cpu tensor to copy data from.
-      t = tensor.type().tensor(
+      t = at::getType(tensor).tensor(
           tensor.storage(),
           /* storageOffset = */ 0,
           /* size = */ { static_cast<int64_t>(tensor.type().elementSizeInBytes() * tensor.storage().size()) },
@@ -665,7 +690,7 @@ void ModuleEncoder::EncodeTensor(
     }
 
     auto record_number = file_writer_.writeRecord(
-      static_cast<char*>(t.storage().data()), t.type().elementSizeInBytes() * t.numel());
+      static_cast<char*>(t.storage().data()), t.type().elementSizeInBytes() * t.storage().size());
     tensor_proto->add_int64_data(record_number);
     storage_dedup_map_[storage_ptr] = record_number;
   }

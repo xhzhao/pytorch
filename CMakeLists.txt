@@ -5,6 +5,11 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
+set(CMAKE_CXX_STANDARD 11)
+if (NOT MSVC)
+  set(CMAKE_C_STANDARD 11)
+endif()
+
 set(CAFFE2_VERSION_MAJOR 0)
 set(CAFFE2_VERSION_MINOR 8)
 set(CAFFE2_VERSION_PATCH 2)
@@ -56,10 +61,11 @@ include(CMakeDependentOption)
 option(BUILD_TORCH "Build Torch" OFF)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 option(BUILD_ATEN_MOBILE "Build ATen for Android and iOS" OFF)
-option(BUILD_BINARY "Build C++ binaries" ON)
+option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
+option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
@@ -82,8 +88,6 @@ cmake_dependent_option(
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" ON)
 option(USE_GLOG "Use GLOG" ON)
-option(USE_GLOO "Use Gloo" ON)
-option(USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed support" OFF)
 option(USE_LEVELDB "Use LEVELDB" ON)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" ON)
@@ -115,10 +119,16 @@ option(USE_ZSTD "Use ZSTD" OFF)
 option(USE_MKLDNN "Use MKLDNN" OFF)
 option(USE_IDEEP "Use IDEEP interface in MKL BLAS" ON)
 option(USE_MKLML "Use MKLML interface in MKL BLAS" ON)
-option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
+option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
-    USE_MPI "Use MPI" ON
+    USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
+    "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed. Only available if USE_GLOO is on." OFF
+    "USE_GLOO" OFF)
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
@@ -289,6 +299,7 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR})
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
 
 # ---[ Main build
+add_subdirectory(c10)
 add_subdirectory(caffe2)
 
 # --[ Documentation
@@ -380,6 +391,7 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
+      ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
@@ -399,23 +411,15 @@ else()
 endif()
 
 # ---[ Modules
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (NOT (MSVC AND BUILD_SHARED_LIBS))
 add_subdirectory(modules)
-endif()
 
 # ---[ Binaries
 # Binaries will be built after the Caffe2 main libraries and the modules
 # are built. For the binaries, they will be linked to the Caffe2 main
 # libraries, as well as all the modules that are built with Caffe2 (the ones
 # built in the previous Modules section above).
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (NOT (MSVC AND BUILD_SHARED_LIBS))
 if (BUILD_BINARY)
   add_subdirectory(binaries)
-endif()
 endif()
 
 include(cmake/Summary.cmake)

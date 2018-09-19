@@ -30,9 +30,11 @@ if not TEST_CUDA:
     TestCase = object  # noqa: F811
 
 TEST_MAGMA = TEST_CUDA
+TEST_LARGE_TENSOR = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
     TEST_MAGMA = torch.cuda.has_magma
+    TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 9e9
 
 floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
                 torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
@@ -161,6 +163,10 @@ def constant_tensor_add(a, b):
         return a + b
 
 
+def small_0d(t):
+    return make_tensor(t, (1,)).squeeze()
+
+
 def small_2d(t):
     return make_tensor(t, S, S)
 
@@ -258,6 +264,7 @@ tests = [
     ('mul', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
         "skipIfRocm:ByteTensor,CharTensor,HalfTensor,ShortTensor"),
     ('mul', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
+    ('mul', small_0d, lambda t: [small_0d(torch.IntTensor)], 'scalar', types, True),
     ('div', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
         "skipIfRocm:ByteTensor,CharTensor,FloatTensor,HalfTensor,ShortTensor"),
     ('div', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
@@ -280,6 +287,7 @@ tests = [
         types, False, "skipIfRocm:HalfTensor"),
     ('baddbmm', small_3d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars',
         types, False, "skipIfRocm:HalfTensor"),
+    ('bmm', small_3d, lambda t: [small_3d(t)], '', float_types_no_half, False, "skipIfRocm:HalfTensor"),
     ('addcdiv', small_2d_lapack, lambda t: [tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)], '',
         types, False, "skipIfRocm:HalfTensor"),
     ('addcdiv', small_2d_lapack, lambda t: [number(2.8, 1, t), tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)],
@@ -902,6 +910,22 @@ class TestCuda(TestCase):
         self.assertIsInstance(y.cuda().float().cpu(), torch.FloatStorage)
         self.assertIsInstance(y.cuda().float().cpu().int(), torch.IntStorage)
 
+    def test_mul_intertype_scalar(self):
+        def test_mul(dtype):
+            x = torch.tensor(1.5, dtype=dtype, device='cuda')
+            y = torch.tensor(3, dtype=torch.int32, device='cuda')
+
+            self.assertEqual(x * y, 4.5)
+            self.assertEqual(y * x, 4.5)
+            with self.assertRaisesRegex(RuntimeError, 'expected type'):
+                y *= x
+            x *= y
+            self.assertEqual(x, 4.5)
+
+        test_mul(torch.float16)
+        test_mul(torch.float32)
+        test_mul(torch.float64)
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @skipIfRocm
     def test_type_conversions_same_gpu(self):
@@ -912,6 +936,28 @@ class TestCuda(TestCase):
 
     def test_neg(self):
         TestTorch._test_neg(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_arithmetic_large_tensor(self):
+        x = torch.empty(2**30, device='cuda')
+
+        x.fill_(1)
+        self.assertEqual(x.sum(), 2**30)
+
+        x += 1
+        self.assertEqual(x.sum(), 2**31)
+
+        x.fill_(1)
+        x -= 0.5
+        self.assertEqual(x.sum(), 2**29)
+
+        x.fill_(1)
+        x *= 2
+        self.assertEqual(x.sum(), 2**31)
+
+        x.fill_(1)
+        x /= 2
+        self.assertEqual(x.sum(), 2**29)
 
     def _test_broadcast(self, input):
         if not TEST_MULTIGPU:
@@ -1194,8 +1240,8 @@ class TestCuda(TestCase):
         TestTorch._test_cat_empty(self, use_cuda=True)
 
     def test_bernoulli(self):
-        x = torch.tensor([0, 1], dtype=torch.float32, device='cuda')
-        self.assertEqual(x.bernoulli().tolist(), [0, 1])
+        TestTorch._test_bernoulli(self, torch.double, 'cuda')
+        TestTorch._test_bernoulli(self, torch.half, 'cuda')
 
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1).cuda()
@@ -1461,6 +1507,10 @@ class TestCuda(TestCase):
         TestTorch._test_matrix_rank(self, lambda x: x.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_matrix_power(self):
+        TestTorch._test_matrix_power(self, conv_fn=lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):
         TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
@@ -1546,6 +1596,17 @@ class TestCuda(TestCase):
         torch.cuda.manual_seed(5214)
         r = torch.multinomial(p, 1)
         self.assertNotEqual(r.min().item(), 0)
+
+        # multinomial without repeat but with less nonzero
+        # elements than draws
+        # the intention currently is to return 0 for those
+        # and match CPU behaviour, see issue #9062
+        p = torch.zeros(1, 5, device="cuda")
+        p[:, 1] = 1
+        r = torch.multinomial(p, 2, replacement=False)
+        expected = torch.zeros(1, 2, device="cuda", dtype=torch.long)
+        expected[:, 0] = 1
+        self.assertEqual(r, expected)
 
     @staticmethod
     def mute():
@@ -1950,6 +2011,13 @@ class TestCuda(TestCase):
 
             with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 1"):
                 leak_gpu1()
+
+    def test_cuda_memory_leak_detection_propagates_errors(self):
+        with self.assertRaisesRegex(RuntimeError, r"The size of tensor a \(3\) must match"):
+            with self.assertLeaksNoCudaTensors():
+                x = torch.randn(3, 1, device='cuda')
+                y = torch.randn(2, 1, device='cuda')
+                z = x + y
 
 
 def load_ignore_file():
