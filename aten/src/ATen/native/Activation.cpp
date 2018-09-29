@@ -21,21 +21,21 @@ bool use_mkldnn(const at::Tensor& input) {
 }
 
 Tensor relu(const Tensor & self) {
-  if (use_mkldnn(self))
-    #if AT_MKLDNN_ENABLED()
-      return at::mkldnn_relu(self, 0.0);
-    #endif
-  else
-    return at::threshold(self, 0.0, 0.0);
+  if (use_mkldnn(self)) {
+  #if AT_MKLDNN_ENABLED()
+    return at::mkldnn_relu(self, 0.0);
+  #endif
+  }
+  return at::threshold(self, 0.0, 0.0);
 }
 
 Tensor & relu_(Tensor & self) {
-  if (use_mkldnn(self))
-    #if AT_MKLDNN_ENABLED()
+  if (use_mkldnn(self)) {
+  #if AT_MKLDNN_ENABLED()
     return at::mkldnn_relu_(self, 0.0);
-    #endif
-  else
-    return at::threshold_(self, 0.0, 0.0);
+  #endif
+  }
+  return at::threshold_(self, 0.0, 0.0);
 }
 
 Tensor selu(const Tensor & self) {
