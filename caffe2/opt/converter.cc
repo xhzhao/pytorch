@@ -56,7 +56,7 @@ int getGroup(std::map<std::string, caffe2::Argument>& argMap) {
 
 namespace caffe2 {
 
-CAFFE_DEFINE_REGISTRY(ConverterRegistry, Converter);
+C10_DEFINE_REGISTRY(ConverterRegistry, Converter);
 
 std::map<std::string, caffe2::Argument> Converter::getArgumentsFromOperator(
     caffe2::OperatorDef op) {
@@ -284,8 +284,7 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, bool strict) {
   /// \brief For the construction of the control flow graph we keep track
   /// of a current basic block, which we split up as we come accross control
   /// flow operations such as if and while.
-  auto bbNode =
-      cfg.createNode(util::make_unique<repr::BasicBlockType<repr::NNGraph>>());
+  auto bbNode = cfg.createNamedFunction("main");
 
   for (auto &op : *net.mutable_op()) {
     auto opNode = dfg.createNode(); // Create an empty node for the operator.
@@ -316,7 +315,7 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, bool strict) {
     }
 
     opNode->resetData(convertToNeuralNetOperator(op));
-    auto currentBasicBlock = bbNode->mutableData()->get();
+    auto currentBasicBlock = bbNode->mutableData();
     currentBasicBlock->pushInstructionNode(opNode);
   }
 
@@ -445,8 +444,8 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& old
     if (bbNode->getOutEdges().size() > 1) {
       CAFFE_THROW("Control flow not yet supported in Caffe2 converter.");
     }
-    auto bb = bbNode->data().get();
-    for (const auto &instrNode : bb->getInstructions()) {
+    auto bb = bbNode->data();
+    for (const auto& instrNode : bb.getInstructions()) {
       caffe2::OperatorDef op = convertToOperatorDef(instrNode);
 
       for (const auto &inEdge : instrNode->getInEdges()) {
@@ -517,6 +516,50 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& old
   }
 
   return predictNet;
+}
+
+void pushOpToFront(caffe2::OperatorDef& op, caffe2::NetDef* net) {
+  *net->add_op() = op;
+  google::protobuf::RepeatedPtrField<caffe2::OperatorDef>* op_list(
+      net->mutable_op());
+  // Reverse iterate, swapping new element in front each time
+  for (int i(net->op_size() - 1); i > 0; --i) {
+    op_list->SwapElements(i, i - 1);
+  }
+}
+
+void injectDataEdgeIndicators(caffe2::NetDef* net) {
+  for (const auto& input : net->external_input()) {
+    caffe2::OperatorDef op;
+    op.set_type("Declare");
+    op.add_output(input);
+    pushOpToFront(op, net);
+  }
+  for (const auto& output : net->external_output()) {
+    caffe2::OperatorDef op;
+    op.set_type("Export");
+    op.add_input(output);
+    *net->add_op() = op;
+  }
+  net->clear_external_input();
+  net->clear_external_output();
+}
+
+void removeDataEdgeIndicators(caffe2::NetDef* net) {
+  google::protobuf::RepeatedPtrField<caffe2::OperatorDef>* op_list(
+      net->mutable_op());
+  for (auto i = 0; i < net->op_size(); ++i) {
+    auto op = net->op(i);
+    if (op.type() == "Declare") {
+      net->add_external_input(op.output(0));
+    } else if (op.type() == "Export") {
+      net->add_external_output(op.input(0));
+    } else {
+      continue;
+    }
+    // Note that this compensates for modifying the list inplace
+    op_list->DeleteSubrange(i--, 1);
+  }
 }
 
 } // namespace caffe2

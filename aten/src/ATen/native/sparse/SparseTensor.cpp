@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/InitialTensorOptions.h>
 #include <ATen/native/sparse/SparseUtils.h>
 
 #include <TH/THBlasUtils.h>
@@ -68,7 +69,8 @@ SparseTensor new_sparse(const SparseType& dtype) {
   } else {
     type_id = SparseCPUTensorId();
   }
-  return SparseTensor(c10::make_intrusive<SparseTensorImpl>(type_id, scalarTypeToTypeMeta(dtype.scalarType())));
+  return detail::make_tensor<SparseTensorImpl>(
+      type_id, scalarTypeToTypeMeta(dtype.scalarType()));
 }
 
 /*** Helper methods ***/
@@ -98,7 +100,7 @@ SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& val
     computed_indices_sizes.add_(1); // len = max_index + 1
     LongTensor cpu_computed_indices_sizes;
     if (computed_indices_sizes.is_cuda()) {
-      cpu_computed_indices_sizes = at::CPU(kLong).tensor(computed_indices_sizes.sizes());
+      cpu_computed_indices_sizes = at::empty(computed_indices_sizes.sizes(), at::initialTensorOptions().dtype(kLong));
       cpu_computed_indices_sizes.copy_(computed_indices_sizes);
     } else {
       cpu_computed_indices_sizes = computed_indices_sizes;
@@ -204,7 +206,7 @@ SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Te
 
 SparseTensor clone_sparse(const SparseTensor& self) {
   SparseTensor other = new_with_dims_and_size_sparse(self.type(), self._sparseDims(), self._denseDims(), self.sizes());
-  _copy_into_sparse(other, _get_sparse_impl(self)->indices(), _get_sparse_impl(self)->values());
+  _copy_into_sparse(other, _get_sparse_impl(self)->indices(), _get_sparse_impl(self)->values(), true);
   _get_sparse_impl(other)->set_coalesced(self.is_coalesced());
   return other;
 }
@@ -243,11 +245,11 @@ Tensor sparse_to_dense(const SparseTensor& self) {
   return dst.add_(self);
 }
 
-SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src) {
+SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non_blocking) {
   if (isSameTensor(self, src)) return self;
   _get_sparse_impl(self)->resize_(src._sparseDims(), src._denseDims(), src.sizes());
   // NB: This seems to copy the underlying full indices/values buffer
-  _copy_into_sparse(self, _get_sparse_impl(src)->indices(), _get_sparse_impl(src)->values());
+  _copy_into_sparse(self, _get_sparse_impl(src)->indices(), _get_sparse_impl(src)->values(), non_blocking);
   _get_sparse_impl(self)->set_coalesced(src.is_coalesced());
   return self;
 }
