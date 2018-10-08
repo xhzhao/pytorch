@@ -1259,6 +1259,9 @@
 - name: mkldnn_relu_(Tensor self, double negative_slope)
   self: mkldnn_relu_backward(output, grad, negative_slope)
 
+- name: mkldnn_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double exponential_average_factor, double epsilon)
+  input, weight, bias: mkldnn_batch_norm_backward(input, grad.contiguous(), weight, bias, running_mean, running_var, result1, result2, epsilon)
+
 # fft
 - name: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes)
   self: fft_backward(self, grad, signal_ndim, complex_input, complex_output, inverse, checked_signal_sizes, normalized, onesided, output_sizes)

@@ -1101,6 +1101,12 @@
 - func: mkldnn_relu_backward(Tensor self, Tensor grad_output, double negative_slope) -> Tensor
   variants: function
 
+- func: mkldnn_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double exponential_average_factor, double epsilon) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: mkldnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, Tensor save_mean, Tensor save_var, double epsilon) -> (Tensor, Tensor, Tensor)
+  variants: function
+
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double exponential_average_factor, double epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:
     CUDA: miopen_batch_norm
