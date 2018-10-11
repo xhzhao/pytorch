@@ -7,14 +7,14 @@
 namespace at { namespace native {
 
 at::Tensor mkldnn_relu(const at::Tensor& input, double negative_slope) {
-  throw std::runtime_error("mkldnn_relu_forward: ATen not compiled with MKLDNN support");
+  AT_ERROR("mkldnn_relu: ATen not compiled with MKLDNN support");
 }
 
 at::Tensor & mkldnn_relu_(at::Tensor& input, double negative_slope) {
-  throw std::runtime_error("mkldnn_relu_forward: ATen not compiled with MKLDNN support");
+  AT_ERROR("mkldnn_relu_: ATen not compiled with MKLDNN support");
 }
 at::Tensor mkldnn_relu_backward(const at::Tensor& input, const at::Tensor& grad_output_t, double negative_slope) {
-  throw std::runtime_error("mkldnn_relu_backward: ATen not compiled with MKLDNN support");
+  AT_ERROR("mkldnn_relu_backward: ATen not compiled with MKLDNN support");
 }
 
 }} // namespace at::native
@@ -40,7 +40,7 @@ at::Tensor mkldnn_relu(const at::Tensor& input, const double negative_slope = 0.
     input_tz[i] = input_size[i];
 
   //create a output tensor with same size with input
-  auto output = input.type().tensor(input_size);
+  auto output = at::empty(input_size, input.options());
   auto input_md = memory::desc({input_tz}, data_t, format_input);
   auto output_md = memory::desc({input_tz}, data_t, format_input);
 
@@ -121,7 +121,7 @@ at::Tensor mkldnn_relu_backward(const at::Tensor& input, const at::Tensor& grad_
   IntList input_size = input.sizes();
   auto dim = input_size.size();
   Tensor grad_output = grad_output_t.contiguous();
-  auto grad_input =  grad_output.type().tensor(input_size);
+  auto grad_input = at::empty(input_size, grad_output.options());
 
   memory::dims input_tz(dim);
   auto format_input = (dim == 5) ? memory::format::ncdhw : memory::format::nchw;
@@ -149,7 +149,7 @@ at::Tensor mkldnn_relu_backward(const at::Tensor& input, const at::Tensor& grad_
 
   // create memory for relu diff src
   auto input_memory = memory({{{input_tz}, data_t, format_input}, cpu_engine}, input.data_ptr());
-  auto diff_dst_memory  = memory({{{input_tz}, data_t, format_input}, cpu_engine},grad_output.data_ptr());
+  auto diff_dst_memory  = memory({{{input_tz}, data_t, format_input}, cpu_engine}, grad_output.data_ptr());
 
   auto grad_input_usr_memory = memory({{{input_tz}, data_t, format_input}, cpu_engine}, grad_input.data_ptr());
   auto grad_input_pd = eltwise_backward_pd->diff_src_primitive_desc();

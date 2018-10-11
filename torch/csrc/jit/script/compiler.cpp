@@ -1,5 +1,7 @@
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
+#include "torch/csrc/jit/passes/annotate_effects.h"
+#include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
@@ -7,11 +9,11 @@
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/script/builtin_functions.h"
 
 #include "torch/csrc/jit/constants.h"
 
 #include "ATen/core/optional.h"
-
 
 #include <climits>
 #include <set>
@@ -73,10 +75,14 @@ static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
     n = graph.createNumToTensor(value);
   } else if (dst->isSubtypeOf(NumberType::get()) && orig->isSubtypeOf(DynamicType::get())) {
     n = graph.createTensorToNum(dst, value);
+  } else if (dst->isSubtypeOf(BoolType::get()) && orig->isSubtypeOf(DynamicType::get())) {
+    n = graph.createTensorToBool(value);
   } else if(dst->isSubtypeOf(IntType::get()) && orig->isSubtypeOf(FloatType::get())) {
     n = graph.createFloatToInt(value);
   } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(IntType::get())) {
     n = graph.createIntToFloat(value);
+  } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(StringType::get())) {
+    n = graph.createStringToFloat(value);
   } else {
     throw ErrorReport(loc) << "Cannot cast type '" << orig->str() << "' to type '"
       << dst->str() << "'.";
@@ -321,7 +327,7 @@ struct Environment {
         {"print", std::make_shared<PrintValue>()},
         {"float", std::make_shared<CastValue>(FloatType::get())},
         {"int", std::make_shared<CastValue>(IntType::get())},
-        {"bool", std::make_shared<CastValue>(IntType::get())},
+        {"bool", std::make_shared<CastValue>(BoolType::get())},
         // todo(zach): remove when we can correctly export torch.full via ONNX
         // or we have implicit conversion that can convert numbers to tensors
         {"_to_tensor", std::make_shared<CastValue>(DynamicType::get()) },
@@ -448,7 +454,8 @@ Value* tryMatchArgument(
     const SourceRange& loc,
     const NamedValue& named_value,
     std::function<std::ostream&()> err,
-    bool convert_tensors_to_nums) {
+    bool convert_tensors_to_nums,
+    TypeEnv & type_env) {
   Value* value = named_value.value(graph);
 
   // some functions that take lists of integers for fixed size arrays
@@ -459,35 +466,44 @@ Value* tryMatchArgument(
     value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
   }
 
+  TypePtr concrete_type;
+  try {
+    concrete_type = matchTypeVariables(arg.type, value->type(), type_env);
+  } catch(TypeMatchError& e) {
+    err() << "could not match type " << value->type()->str() << " to "
+          << arg.type->str() << " in argument '" << arg.name << "': " << e.what() << "\n"
+          << named_value.locOr(loc);
+    return nullptr;
+  }
+
   // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
-  if (convertibleToList(value->type(), arg.type) &&
+  if (convertibleToList(value->type(), concrete_type) &&
       value->type()->kind() == TypeKind::TupleType) {
     auto unpacked = createTupleUnpack(value);
-    auto elem_type = arg.type->expect<ListType>()->getElementType();
+    auto elem_type = concrete_type->expect<ListType>()->getElementType();
     value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
   if (value->node()->kind() == prim::None){
-    if (arg.type->isSubtypeOf(NumberType::get()))
+    if (concrete_type->isSubtypeOf(NumberType::get()))
       value = graph.insertConstant(at::Scalar(NAN), loc);
-    else if (arg.type->isSubtypeOf(GeneratorType::get())) {
-      value = graph.insertNode(graph.createNoneGenerator())
-        ->output()->setType(GeneratorType::get());
+    else if (concrete_type->isSubtypeOf(GeneratorType::get())) {
+      value = graph.insertNode(graph.createNoneGenerator())->output();
     } else
       value = graph.insertNode(graph.createUndefined())->output();
   }
 
   //implicit conversion of tensors to scalars
-  if(convert_tensors_to_nums && arg.type->isSubtypeOf(NumberType::get())
+  if(convert_tensors_to_nums && concrete_type->isSubtypeOf(NumberType::get())
       && value->type()->isSubtypeOf(DynamicType::get())) {
-      auto n = graph.createImplicitTensorToNum(arg.type, value);
+      auto n = graph.createImplicitTensorToNum(concrete_type, value);
       value = graph.insertNode(n)
         ->setSourceLocation(std::make_shared<SourceRange>(loc))
         ->output();
   }
 
-  if(!value->type()->isSubtypeOf(arg.type)) {
-    err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
+  if(!value->type()->isSubtypeOf(concrete_type)) {
+    err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name << "' but found "
           << value->type()->str() << "\n"
           << named_value.locOr(loc);
     return nullptr;
@@ -509,11 +525,12 @@ Value* tryCreateList(
     const SourceRange& loc,
     at::ArrayRef<NamedValue> varargs,
     std::function<std::ostream&()> err,
-    bool convert_tensor_to_num) {
-  Argument elem_arg("", elem_type);
+    bool convert_tensor_to_num,
+    TypeEnv & type_env) {
+  Argument elem_arg("<varargs>", elem_type);
   std::vector<Value*> list_ctor;
   for(const auto& a : varargs) {
-    Value* av = tryMatchArgument(elem_arg, graph, loc, a, err, convert_tensor_to_num);
+    Value* av = tryMatchArgument(elem_arg, graph, loc, a, err, convert_tensor_to_num, type_env);
     if(!av)
       return nullptr;
     list_ctor.push_back(av);
@@ -536,117 +553,129 @@ static Value* materializeConstant(T val, Graph& graph,
   return new_constant;
 }
 
-at::optional<std::vector<Value*>> tryMatchSchema(
-  const FunctionSchema& schema,
-  const SourceRange& loc,
-  Graph& graph,
-  at::ArrayRef<NamedValue> args,
-  at::ArrayRef<NamedValue> kwargs,
-  std::ostream& failure_messages,
-  bool convert_tensors_to_nums) {
-    auto err = [&]() -> std::ostream& {
-      failure_messages << "\nfor operator " << schema << ":\n";
-      return failure_messages;
-    };
+at::optional<MatchedSchema> tryMatchSchema(
+    const FunctionSchema& schema,
+    const SourceRange& loc,
+    Graph& graph,
+    at::ArrayRef<NamedValue> raw_args,
+    at::ArrayRef<NamedValue> kwargs,
+    std::ostream& failure_messages,
+    bool convert_tensors_to_nums) {
+  // Match against a potentially mutable schema.
+  //
+  // We need to treat mutable schemas differently because the IR explicitly
+  // expresses effects by including a world token in mutable ops. Users do not
+  // know about the world token, so we need to generate a dummy one and add
+  // it to the inputs for schema matching.
+  //
+  // Example:
+  //   append(int[] list, int el)
+  // becomes
+  //   append(World w, int[] list, int el)
+  //
+  // NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
+  // necessary to enforce linearization on effectful ops.
+  std::vector<NamedValue> modifiedArgs(raw_args.begin(), raw_args.end());
+  if (schema.is_mutable) {
+    // Add a dummy world token to be matched against
+    const auto worldToken = graph.insertDummyWorld();
+    modifiedArgs.insert(modifiedArgs.begin(), worldToken);
+  }
+  auto err = [&]() -> std::ostream& {
+    failure_messages << "\nfor operator " << schema << ":\n";
+    return failure_messages;
+  };
 
-    std::vector<Value*> positional_inputs;
-    std::vector<bool> used_kwarg(kwargs.size(), false);
+  TypeEnv type_env;
+  std::vector<Value*> positional_inputs;
+  std::vector<bool> used_kwarg(kwargs.size(), false);
 
-    // if we finish the loop will we have consumed all arguments?
-    size_t used_args = 0;
+  // if we finish the loop will we have consumed all arguments?
+  size_t used_args = 0;
 
-    for(size_t schema_i = 0; schema_i < schema.arguments.size(); ++schema_i) {
-      const auto& arg = schema.arguments[schema_i];
-      at::optional<NamedValue> v;
-      if(!arg.kwarg_only && schema_i < args.size()) {
-
-        // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
-        if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
-            !arg.N && // it must not be a broadcasting list like int[3], otherwise a single int is a valid input
-            (schema_i + 1 == schema.arguments.size() || schema.arguments[schema_i + 1].kwarg_only) &&  // must be the last position argument
-            !convertibleToList(args[schema_i].value(graph)->type(), arg.type)) { // and the actual should not be a list already
+  for (size_t schema_i = 0; schema_i < schema.arguments.size(); ++schema_i) {
+    const auto& arg = schema.arguments[schema_i];
+    at::optional<NamedValue> v;
+    if (!arg.kwarg_only && schema_i < modifiedArgs.size()) {
+      // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
+      if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
+          !arg.N && // it must not be a broadcasting list like int[3], otherwise
+                    // a single int is a valid input
+          (schema_i + 1 == schema.arguments.size() ||
+           schema.arguments[schema_i + 1]
+               .kwarg_only)) { // must be the last position argument
+        auto actual_type = modifiedArgs[schema_i].value(graph)->type();
+        if (actual_type->kind() != TypeKind::ListType &&
+            !convertibleToList(
+                actual_type,
+                arg.type)) { // and the actual should not be a list already
           auto elem_type = arg.type->expect<ListType>()->getElementType();
-          Value* list = tryCreateList(elem_type, graph, loc, args.slice(schema_i),
-            err, convert_tensors_to_nums);
-          if(!list)
+          Value* list = tryCreateList(
+              elem_type,
+              graph,
+              loc,
+              at::ArrayRef<NamedValue>(modifiedArgs).slice(schema_i),
+              err,
+              convert_tensors_to_nums,
+              type_env);
+          if (!list)
             return at::nullopt;
-          used_args = args.size();
+          used_args = modifiedArgs.size();
           positional_inputs.push_back(list);
           continue;
         }
+      }
 
-        v = args[schema_i];
-        used_args++;
-      } else if(auto idx = findInputWithName(arg.name, kwargs))  {
-        const NamedValue& nv = kwargs[*idx];
-        if(used_kwarg[*idx]) {
-          err() << "argument " << nv.name() << " specified twice in schema, submit a bug report!\n" << nv.locOr(loc);
-          return at::nullopt;
-        }
-        used_kwarg[*idx] = true;
-        v = nv;
-      } else if(arg.default_value) {
-        v = NamedValue(*arg.default_value);
-      } else {
-        err() << "argument " << schema.arguments[schema_i].name << " not provided.\n" << loc;
+      v = modifiedArgs[schema_i];
+      used_args++;
+    } else if (auto idx = findInputWithName(arg.name, kwargs)) {
+      const NamedValue& nv = kwargs[*idx];
+      if (used_kwarg[*idx]) {
+        err() << "argument " << nv.name()
+              << " specified twice in schema, submit a bug report!\n"
+              << nv.locOr(loc);
         return at::nullopt;
       }
-      Value * positional = tryMatchArgument(arg, graph, loc, *v, err, convert_tensors_to_nums);
-      if(!positional)
-        return at::nullopt;
-      positional_inputs.push_back(positional);
-    }
-
-    // check for unused positional arguments
-    if(used_args < args.size()) {
-      err() << "expected at most " << used_args << " arguments "
-      << "but found " << args.size() << " positional arguments.\n" << loc << "\n";
+      used_kwarg[*idx] = true;
+      v = nv;
+    } else if (arg.default_value) {
+      v = NamedValue(*arg.default_value);
+    } else {
+      err() << "argument " << schema.arguments[schema_i].name
+            << " not provided.\n"
+            << loc;
       return at::nullopt;
     }
-    // check for unused kwargs
-    for(size_t i = 0; i < kwargs.size(); ++i) {
-      const auto& nv = kwargs[i];
-      if (!used_kwarg[i]) {
-        if(!schema.argumentIndexWithName(nv.name())) {
-          err() << "keyword argument " << nv.name() << " unknown\n";
-        } else {
-          err() << "keyword argument " << nv.name() << " specified twice\n";
-        }
-        return at::nullopt;
-      }
-    }
-    return positional_inputs;
-}
-
-
-static Value* tryEmitBuiltin(
-  const std::shared_ptr<Operator>& op,
-  std::stringstream& failure_messages,
-  const SourceRange& loc,
-  Graph& graph,
-  Symbol name,
-  at::ArrayRef<NamedValue> inputs,
-  at::ArrayRef<NamedValue> attributes,
-  bool convert_tensors_to_nums) {
-
-  auto matched_inputs = tryMatchSchema(op->schema(), loc, graph, inputs, attributes,
-    failure_messages, convert_tensors_to_nums);
-  if(!matched_inputs)
-    return nullptr;
-  // we successfully matched this schema, construct the node
-
-  auto n = graph.insertNode(graph.create(name, *matched_inputs, 0))
-                ->setSourceLocation(std::make_shared<SourceRange>(loc));
-
-  for(auto & ret : op->schema().returns) {
-    n->addOutput()->setType(ret.type);
+    Value* positional = tryMatchArgument(
+        arg, graph, loc, *v, err, convert_tensors_to_nums, type_env);
+    if (!positional)
+      return at::nullopt;
+    positional_inputs.push_back(positional);
   }
 
-  // assert that we did indeed create an op that has implementation
-  // otherwise schema and dispatch are not in sync
-  getOperation(n);
-
-  return packOutputs(graph, n->outputs());
+  // check for unused positional arguments
+  if (used_args < modifiedArgs.size()) {
+    err() << "expected at most " << used_args << " arguments "
+          << "but found " << modifiedArgs.size() << " positional arguments.\n"
+          << loc << "\n";
+    return at::nullopt;
+  }
+  // check for unused kwargs
+  for (size_t i = 0; i < kwargs.size(); ++i) {
+    const auto& nv = kwargs[i];
+    if (!used_kwarg[i]) {
+      if (!schema.argumentIndexWithName(nv.name())) {
+        err() << "keyword argument " << nv.name() << " unknown\n";
+      } else {
+        err() << "keyword argument " << nv.name() << " specified twice\n";
+      }
+      return at::nullopt;
+    }
+  }
+  auto return_types = fmap(schema.returns, [&](const Argument& r) {
+    return evalTypeVariables(r.type, type_env);
+  });
+  return MatchedSchema{std::move(positional_inputs), std::move(return_types)};
 }
 
 static std::string prefixLine(const std::string& str, std::string prefix) {
@@ -661,6 +690,29 @@ static std::string prefixLine(const std::string& str, std::string prefix) {
   return ss.str();
 }
 
+// Given a successful match between operator schema and symbol, emit a node
+// with the appropriate inputs and outputs.
+static Value* emitBuiltinNode(
+    const MatchedSchema& matched_schema,
+    const SourceRange& loc,
+    Graph& graph,
+    Symbol name) {
+  auto n = graph.insertNode(graph.create(name, matched_schema.inputs, 0))
+                ->setSourceLocation(std::make_shared<SourceRange>(loc));
+
+  for(auto & ret : matched_schema.return_types) {
+    n->addOutput()->setType(ret);
+  }
+
+  // assert that we did indeed create an op that has implementation
+  // otherwise schema and dispatch are not in sync
+  getOperation(n);
+
+  return packOutputs(graph, n->outputs());
+}
+
+// Search for operators matching the provided symbol name and input types.
+// If one is found, emit a node to the graph for that operator.
 Value* emitBuiltinCall(
   const SourceRange& loc,
   Graph& graph,
@@ -673,23 +725,45 @@ Value* emitBuiltinCall(
 
 
   const auto& variants = getAllOperatorsFor(name);
+  const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
+
   std::stringstream failure_messages;
   //first we try to match the schema without any conversion
   //if no schema matches then insert ImplicitTensorToNum
-  for(bool convert_tensors_to_nums : {false, true}) {
-    //clear previous error messages
+  for (bool convert_tensors_to_nums : {false, true}) {
+    // clear previous error messages
     failure_messages.str("");
     for (const std::shared_ptr<Operator>& op : variants) {
-      if (auto result = tryEmitBuiltin(
-              op, failure_messages, loc, graph, name, inputs, attributes,
+      const auto matched_schema = tryMatchSchema(
+          op->schema(),
+          loc,
+          graph,
+          inputs,
+          attributes,
+          failure_messages,
+          convert_tensors_to_nums);
+
+      if (matched_schema) {
+        return emitBuiltinNode(*matched_schema, loc, graph, name);
+      }
+    }
+    for (Method* method : builtin_functions) {
+      if (auto result = try_emit_call_to(
+              graph,
+              loc,
+              *method,
+              inputs,
+              attributes,
+              failure_messages,
+              nullptr,
               convert_tensors_to_nums)) {
-        return result;
+        return packOutputs(graph, *result);
       }
     }
   }
 
   // none of the options worked
-  if(!required) {
+  if (!required) {
     return nullptr;
   }
   if(variants.size() == 0) {
@@ -718,8 +792,13 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
   if (value)
     inputs.push_back(*value);
   inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
-  return std::make_shared<SimpleValue>(
-      emitBuiltinCall(loc, *m.graph(), symbol, inputs, attributes, true));
+  return std::make_shared<SimpleValue>(emitBuiltinCall(
+      loc, *m.graph(), symbol, inputs, attributes, true));
+}
+
+inline bool isSupportedListElementType(TypePtr type) {
+  return type->isSubtypeOf(DynamicType::get()) ||
+      type->isSubtypeOf(NumberType::get());
 }
 
 struct to_ir {
@@ -821,8 +900,11 @@ struct to_ir {
     }
 
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
+    // annotate effects to prevent reordering
+    AnnotateEffects(graph);
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(graph);
+    ConstantPooling(graph);
   }
 
 private:
@@ -970,11 +1052,15 @@ private:
 
   Value* emitCond(Expr cond) {
     Value* v = emitExpr(cond);
-    if(v->type()->isSubtypeOf(DynamicType::get())) {
-      v = typeCast(cond.range(), v, IntType::get());
-    }
-    if(!v->type()->isSubtypeOf(IntType::get())) {
-      throw ErrorReport(cond) << "expected a tensor or integer expression for condition but found " << v->type()->str();
+    if (!v->type()->isSubtypeOf(BoolType::get())) {
+      ErrorReport error(cond);
+      error << "expected a boolean expression for condition but found "
+            << v->type()->str();
+      if (v->type()->isSubtypeOf(DynamicType::get())) {
+        error << ", to use a tensor in a boolean"
+              << " expression, explicitly cast it with `bool()`";
+      }
+      throw error;
     }
     return v;
   }
@@ -1339,6 +1425,8 @@ private:
         return prim::Starred;
       case '/':
         return aten::div;
+      case '%':
+        return aten::remainder;
       case TK_NE:
         return aten::ne;
       case TK_EQ:
@@ -1480,6 +1568,7 @@ private:
       case '/':
       case '+':
       case '-':
+      case '%':
       case TK_UNARY_MINUS: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
@@ -1525,8 +1614,7 @@ private:
         if (slice_exprs[0].kind() == TK_SLICE_EXPR) {
           return emitBasicSlice(subscript);
         } else {
-          return emitBasicGather(
-              subscript.range(), TreeList{subscript.value(), slice_exprs[0]});
+          return emitBasicGather(subscript);
         }
       } break;
       case TK_IF_EXPR: {
@@ -1549,8 +1637,9 @@ private:
                 << *elem_type << " but found " << *v->type() << " instead";
           }
         }
-        return graph->insertNode(graph->createList(elem_type, values))
+        Value* result = graph->insertNode(graph->createList(elem_type, values))
             ->output();
+        return result;
       } break;
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
@@ -1620,26 +1709,34 @@ private:
     return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
   }
 
-  // Desugars multidim slicing into aten::slice / aten::select calls.
-  //
-  // XXX: Errors in user code are not elegantly reported.
-  // Let's say someone were to do the following:
-  //   @torch.jit.script
-  //   def fn(x):
-  //       return x[0, 1]
-  //   fn(torch.randn(5))
-  // Because we desugar this into two aten::select ops, the error message
-  // complains about aten::select failing rather than there "not being
-  // enough dimensions to index".
-  Value * emitMultidimSlicing(const Subscript& subscript) {
-    const auto& loc = subscript.range();
-    auto * sliceable = emitExpr(subscript.value());
-    if (!sliceable->type()->isSubtypeOf(DynamicType::get())) {
-      throw ErrorReport(loc)
-        << "Unsupported operation: attempted to use multidimensional "
-        << "indexing on a non-tensor type.";
-    }
+  Value* emitIndex(
+      const SourceRange& loc,
+      Value* input,
+      at::ArrayRef<Value*> indices) {
+    auto* index = graph->insertNode(
+        graph->createList(DynamicType::get(), indices))->output();
+    return emitBuiltinCall(loc, *graph, aten::index, {input, index}, {}, true);
+  }
+
+  // Emits multidimensional slicing with int and slice indices.
+  // Returns:
+  // - Value*: the input after it has been indexed by int and slice indices.
+  // - vector<Value*>: A list of tensor Value* indices that have not been applied yet.
+  //   Should be NULL at indices where sliceable (post-slicing) isn't indexed by a tensor.
+  std::pair<Value*, std::vector<Value*>> emitIntAndSliceIndexing(
+      const SourceRange& loc,
+      Value* sliceable,
+      const Subscript& subscript) {
+    std::vector<Value*> tensor_indices;
     size_t dim = 0;
+
+    auto handle_tensor = [&](Value* tensor) {
+      // NB: tensor_indices can have NULL holes because of how at::index works.
+      tensor_indices.resize(dim + 1);
+      tensor_indices[dim] = tensor;
+      dim++;
+    };
+
     for (const auto & subscript_expr : subscript.subscript_exprs()) {
       if (subscript_expr.kind() == TK_SLICE_EXPR) {
         sliceable = emitSlice(loc, sliceable, dim, SliceExpr(subscript_expr));
@@ -1651,13 +1748,64 @@ private:
         sliceable = emitSelect(loc, sliceable, dim, index);
         continue;
       } else if (index->type()->isSubtypeOf(DynamicType::get())) {
-        throw std::runtime_error("NYI: advanced indexing");
+        handle_tensor(index);
+        continue;
       }
       throw ErrorReport(loc)
-        << "Unsupported operation: attempted to use multidimensional "
-        << "indexing with unsupported index type.";
+        << "Unsupported operation: indexing tensor with unsupported index type "
+        << index->type()->str() << ". Only ints, slices, and tensors are supported.";
     }
-    return sliceable;
+    return std::make_pair(sliceable, tensor_indices);
+  }
+
+  // The strategy is to slice and select the tensor for int and slices first
+  // in one pass and then apply at::index on the result of the slicing/selecting.
+  // Call the tensor after we've applied slice / select the `sliced`.
+  // tensor_indices should have the same size as sliced.dim():
+  // - tensor_indices[i] = NULL if we should not index `sliced` at dim i
+  // - tensor_indices[i] = t if we should index `sliced` at dim i with tensor t.
+  Value* emitMultidimSlicing(
+      const SourceRange& loc,
+      Value* sliceable,
+      const Subscript& subscript) {
+    std::vector<Value*> tensor_indices;
+    std::tie(sliceable, tensor_indices) = emitIntAndSliceIndexing(loc, sliceable, subscript);
+
+    if (tensor_indices.empty()) {
+      // XXX: Might need to at::alias this when we support mutability
+      return sliceable;
+    }
+
+    // at::index takes in a TensorList where some tensors can be undefined.
+    // Convert NULL tensor_indices to undefined tensors to pass to at::index.
+    for (auto& index : tensor_indices) {
+      if (index == nullptr) {
+        index = graph->insertNode(graph->createUndefined())->output();
+      }
+    }
+    return emitIndex(loc, sliceable, tensor_indices);
+  }
+
+  // Desugars multidim slicing into slice/select/index calls.
+  //
+  // XXX: Errors in user code are not elegantly reported.
+  // Let's say someone were to do the following:
+  //   @torch.jit.script
+  //   def fn(x):
+  //       return x[0, 1]
+  //   fn(torch.randn(5))
+  // Because we desugar this into two aten::select ops, the error message
+  // complains about aten::select failing rather than there "not being
+  // enough dimensions to index".
+  Value* emitMultidimSlicing(const Subscript& subscript) {
+    const auto& loc = subscript.range();
+    auto* sliceable = emitExpr(subscript.value());
+    if (!sliceable->type()->isSubtypeOf(DynamicType::get())) {
+      throw ErrorReport(loc)
+        << "Unsupported operation: attempted to use multidimensional "
+        << "indexing on a non-tensor type.";
+    }
+    return emitMultidimSlicing(loc, sliceable, subscript);
   }
 
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
@@ -1669,7 +1817,7 @@ private:
     auto slice_exp = SliceExpr(subscript.subscript_exprs()[0]);
     auto * sliceable = emitExpr(subscript.value());
     at::optional<int64_t> maybe_dim;
-    if (sliceable->type()->kind() == TypeKind::DynamicType) {
+    if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
       maybe_dim = 0;
     }
@@ -1677,24 +1825,19 @@ private:
   }
 
   // Desugars gather syntactic sugar foo[i]
-  Value* emitBasicGather(
-      const SourceRange& loc,
-      TreeList&& inputs) {
-    const auto applyInputs =
-        Compound::create(TK_LIST, loc, std::move(inputs));
-    auto input_values = getNamedValues(applyInputs->trees(),
-                                        /*maybe_unpack*/false);
-    NamedValue gatherable = input_values[0];
-    NamedValue idx = input_values[1];
-    if (gatherable.value(*graph)->type()->kind() == TypeKind::ListType) {
+  Value* emitBasicGather(const Subscript& subscript) {
+    const auto& loc = subscript.range();
+    JIT_ASSERT(subscript.subscript_exprs().size() == 1);
+    auto* gatherable = emitExpr(subscript.value());
+
+    if (gatherable->type()->kind() == TypeKind::ListType) {
       // if it's a list, emit a regular index selection op
+      auto* idx = emitExpr(subscript.subscript_exprs()[0]);
       return emitBuiltinCall(
                  loc, *graph, aten::select, {gatherable, idx}, {}, true);
-
     } else {
-      JIT_ASSERT(gatherable.value(*graph)->type()->isSubtypeOf(DynamicType::get()));
-      return emitSelect(
-          loc, gatherable.value(*graph), /*dim=*/0, idx.value(*graph));
+      JIT_ASSERT(gatherable->type()->isSubtypeOf(DynamicType::get()));
+      return emitMultidimSlicing(loc, gatherable, subscript);
     }
   }
 };
@@ -1727,6 +1870,13 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
   }
   return std::make_shared<BuiltinFunction>(
       Symbol::aten(field), NamedValue(loc, "self", value));
+}
+
+std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc) {
+  if (name == "torch") {
+    return std::make_shared<BuiltinModule>(name);
+  }
+  return nullptr;
 }
 
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
@@ -1782,6 +1932,7 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
     {"Tensor", DynamicType::get()},
     {"int", IntType::get()},
     {"float", FloatType::get()},
+    {"bool", BoolType::get()},
   };
   return map;
 }

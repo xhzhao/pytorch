@@ -31,7 +31,7 @@ from .gen_autograd_functions import uses_single_grad
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'contiguous', 'resize_', 'resize_as_'
+    'contiguous', 'resize_', 'resize_as_', 'detach', 'detach_',
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -124,17 +124,19 @@ if (${cond}) {
 """)
 
 RECORD_FUNCTION = CodeTemplate("""\
-profiler::RecordFunction profiler("${name}");""")
+profiler::RecordFunction profiler("${name}", Function::peek_at_next_sequence_nr());""")
 
 PRE_RECORD_TRACE = CodeTemplate("""\
 torch::jit::Node* node = nullptr;
+std::shared_ptr<jit::tracer::TracingState> tracer_state;
 if (jit::tracer::isTracing()) {
-  auto& graph = jit::tracer::getTracingState()->graph;
-  node = graph->create(jit::aten::${trace_name}, /*outputs=*/0);
+  tracer_state = jit::tracer::getTracingState();
+  node = tracer_state->graph->create(jit::aten::${trace_name}, /*outputs=*/0);
   jit::tracer::recordSourceLocation(node);
   ${add_trace_inputs}
-  graph->appendNode(node);
+  tracer_state->graph->appendNode(node);
   ${inplace_guard}
+  jit::tracer::setTracingState(nullptr);
 }
 """)
 
@@ -142,37 +144,34 @@ INPLACE_GUARD = CodeTemplate("""\
 jit::tracer::ensureUnique("${name}", ${mutable_input});
 """)
 
-ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${input}", ${input});""")
+ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${input});""")
 
 POST_RECORD_TRACE = CodeTemplate("""\
-if (jit::tracer::isTracing()) {
+if (tracer_state) {
+  jit::tracer::setTracingState(std::move(tracer_state));
   ${record_trace_outputs}
 }
 """)
 
-RECORD_ATTRIBUTE = CodeTemplate("""\
-setattr(trace_info.n, jit::attr::${attr_name}, ${name});""")
 
-RECORD_POSITIONAL_ATTRIBUTE = CodeTemplate("""\
-setposattr(trace_info.n, ${i}, "${name}", ${name});""")
+FACTORY_FUNCTION_NAMES = None
 
-POSITIONAL_ATTR_NYI = """\
-throw std::runtime_error("Can't have size-dependent arguments to functions that "
-                         "take variable number of tensor arguments");
-"""
+
+def find_factory_functions(declarations):
+    global FACTORY_FUNCTION_NAMES
+    FACTORY_FUNCTION_NAMES = set()
+
+    for declaration in declarations:
+        if any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments']):
+            FACTORY_FUNCTION_NAMES.add(declaration['api_name'])
 
 
 def should_trace(declaration):
-    # Operations involving Generator, Storage, Type are not traceable
-    # at the moment
-    if any(arg['simple_type'] in {'Generator', 'Storage', 'ScalarType', 'Type', 'optional<ScalarType>'}
-            for arg in declaration['arguments']):
+    # Operations involving Storage or Type are not traceable at the moment
+    if any(arg['simple_type'] in {'Storage', 'Type'} for arg in declaration['arguments']):
         return False
     # We can't trace functions which don't have any Tensor or TensorList returns
     if 'Tensor' not in declaration['return_type']:
-        return False
-    tensor_args = [arg for arg in declaration['arguments'] if arg['simple_type'] in {'Tensor', 'TensorList'}]
-    if len(tensor_args) == 0:
         return False
     name = declaration['name']
     base_name = name[:-1] if declaration['inplace'] else name[:-4] if name.endswith('_out') else name
@@ -198,17 +197,30 @@ def record_trace_outputs(declaration):
 
 def format_trace(declaration):
     local = {}
+    local['trace_name'] = trace_name = uninplace_api_name(declaration['api_name'])
 
-    add_trace_inputs = []
-    for argument in declaration['arguments']:
-        add_trace_inputs.append(ADD_TRACE_INPUT.substitute(input=argument['name']))
-    local['add_trace_inputs'] = '\n'.join(add_trace_inputs)
-    local['inplace_guard'] = ''
+    # *_out functions take the result as a first argument, but since we're
+    # going to de-inplace the call, we need to remove it from the argument list
+    trace_inputs = declaration['arguments']
+    if declaration['name'].endswith('_out'):
+        trace_inputs = trace_inputs[1:]
+    trace_input_spec = [(i['name'], i['name']) for i in trace_inputs]
+
+    # factories are a bit special because their out-of-place overloads
+    # take an extra TensorOptions argument, which is missing in the _out function
+    has_factory_name = trace_name in FACTORY_FUNCTION_NAMES
+    is_out_overload = any(arg['name'] == 'result' for arg in declaration['arguments'])
+    if has_factory_name and is_out_overload:
+        trace_input_spec.append(('result', 'result.options()'))
+
+    local['add_trace_inputs'] = \
+        '\n'.join(ADD_TRACE_INPUT.substitute(name=name, input=value) for name, value in trace_input_spec)
+
     # Record inplace operations as out-of-place operations (e.g.,
     # not add_ but add)
     # TODO: Add a proper concept of side effects to the IR, and
     # properly record inplace operations.
-    local['trace_name'] = uninplace_api_name(declaration['api_name'])
+    local['inplace_guard'] = ''
     if local['trace_name'] != declaration['api_name']:
         local['inplace_guard'] = INPLACE_GUARD.substitute(name=declaration['api_name'],
                                                           mutable_input=declaration['arguments'][0]['name'])
@@ -227,6 +239,7 @@ def gen_variable_type(out, aten_declarations, template_path):
     implementation of each function dispatches to the base tensor type to
     compute the output. The grad_fn is attached to differentiable functions.
     """
+    find_factory_functions(aten_declarations)
 
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
     VARIABLE_TYPE_CPP = CodeTemplate.from_file(template_path + '/VariableType.cpp')

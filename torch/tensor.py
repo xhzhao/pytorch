@@ -241,6 +241,10 @@ class Tensor(torch._C._TensorBase):
         r"""See :func: `torch.argsort`"""
         return torch.argsort(self, dim, descending)
 
+    def norm(self, p="fro", dim=None, keepdim=False):
+        r"""See :func: `torch.norm`"""
+        return torch.norm(self, p, dim, keepdim)
+
     def btrifact(self, info=None, pivot=True):
         r"""See :func:`torch.btrifact`
         """
@@ -325,13 +329,15 @@ class Tensor(torch._C._TensorBase):
         See :func:`torch.unique`
         """
         if dim is not None:
-            output, inverse_indices = self._unique_dim(
+            output, inverse_indices = torch._unique_dim(
+                self,
                 sorted=sorted,
                 return_inverse=return_inverse,
                 dim=dim
             )
         else:
-            output, inverse_indices = self._unique(
+            output, inverse_indices = torch._unique(
+                self,
                 sorted=sorted,
                 return_inverse=return_inverse
             )

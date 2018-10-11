@@ -23,7 +23,7 @@
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // A number of factory functions are implemented in the following way:
 //
-//    return at::getMaybeVariableType(options)._arange(start, end, step);
+//    return at::getType(options)._arange(start, end, step);
 //
 // That is to say, they grab a Type for TensorOptions, and then call some
 // internal method.  What's going on?
@@ -33,7 +33,7 @@
 // (and never will) understand TensorOptions, so we need to handle TensorOptions
 // inside native before batting over to TH.  The expectation is that when
 // these factories get ported to native, this is no longer necessary,
-// and we can eliminate the getMaybeVariableType call.
+// and we can eliminate the getType call.
 
 namespace at {
 namespace native {
@@ -59,6 +59,10 @@ void window_function_checks(
       window_length);
 }
 
+const TypeExtendedInterface& getFactoryType(const TensorOptions& options) {
+  return at::getType(options);
+}
+
 } // namespace
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -73,7 +77,7 @@ Tensor arange(
     Scalar step,
     const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._arange(start, end, step);
+  return getFactoryType(options)._arange(start, end, step);
 }
 
 Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
@@ -86,7 +90,7 @@ Tensor& arange_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 
 Tensor arange(Scalar end, const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._arange(end);
+  return getFactoryType(options)._arange(end);
 }
 
 Tensor& arange_out(Tensor& result, Scalar end) {
@@ -94,7 +98,7 @@ Tensor& arange_out(Tensor& result, Scalar end) {
 }
 
 Tensor _dim_arange(const Tensor& like, int64_t dim) {
-  return like.type().toScalarType(at::kLong)._arange(like.size(dim));
+  return at::getType(like.options().dtype(at::kLong))._arange(like.size(dim));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -102,7 +106,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 Tensor empty(IntList size, const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
   // Can't call a factory function, because the buck stops with us!
-  return at::getMaybeVariableType(options).tensor(size);
+  return getFactoryType(options).tensor(size);
 }
 
 Tensor& empty_out(Tensor& result, IntList size) {
@@ -113,6 +117,12 @@ Tensor& empty_out(Tensor& result, IntList size) {
   }
   return result;
 }
+
+Tensor empty_strided(IntList size, IntList stride, const TensorOptions& options) {
+  // Note [Native bindings for legacy TH factory functions]
+  return getFactoryType(options).tensor(size, stride);
+}
+
 
 // Temporary type cast operators. These are needed to trace type-casts now since
 // Type's are not supported in the IR. Instead, we call down to these
@@ -137,12 +147,11 @@ Tensor empty_like(const Tensor& self) {
 
 Tensor empty_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
-    auto res = native::empty({0}, options); // to be resized
+    auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
-
     return res;
   }
-  return native::empty(self.sizes(), options);
+  return at::empty(self.sizes(), options);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -152,7 +161,7 @@ Tensor eye(int64_t n, const TensorOptions& options) {
 }
 
 Tensor eye(int64_t n, int64_t m, const TensorOptions& options) {
-  auto tensor = native::empty({0}, options); // to be resized
+  auto tensor = at::empty({0}, options); // to be resized
   return at::eye_out(tensor, n, m);
 }
 
@@ -187,7 +196,7 @@ Tensor full(IntList size, Scalar fill_value, const TensorOptions& options) {
   if (options.layout() == kSparse) {
     AT_ERROR("full(...) is not implemented for sparse layout");
   }
-  auto result = native::empty(size, options);
+  auto result = at::empty(size, options);
   return result.fill_(fill_value);
 }
 
@@ -219,7 +228,7 @@ Tensor linspace(
     int64_t steps,
     const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._linspace(start, end, steps);
+  return getFactoryType(options)._linspace(start, end, steps);
 }
 
 Tensor& linspace_out(Tensor& result, Scalar start, Scalar end) {
@@ -242,7 +251,7 @@ Tensor logspace(
     int64_t steps,
     const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._logspace(start, end, steps);
+  return getFactoryType(options)._logspace(start, end, steps);
 }
 
 Tensor& logspace_out(Tensor& result, Scalar start, Scalar end) {
@@ -278,7 +287,7 @@ Tensor rand(IntList size, const TensorOptions& options) {
 }
 
 Tensor rand(IntList size, Generator* generator, const TensorOptions& options) {
-  auto result = native::empty(size, options);
+  auto result = at::empty(size, options);
   return result.uniform_(0, 1, generator);
 }
 
@@ -327,7 +336,7 @@ Tensor randint(
     IntList size,
     Generator* generator,
     const TensorOptions& options) {
-  auto result = native::empty(size, options);
+  auto result = at::empty(size, options);
   return result.random_(low, high, generator);
 }
 
@@ -388,7 +397,7 @@ Tensor randn(IntList size, const TensorOptions& options) {
 }
 
 Tensor randn(IntList size, Generator* generator, const TensorOptions& options) {
-  auto result = native::empty(size, options);
+  auto result = at::empty(size, options);
   return result.normal_(0, 1, generator);
 }
 
@@ -445,7 +454,7 @@ Tensor randperm(int64_t n, const TensorOptions& options) {
 }
 
 Tensor randperm(int64_t n, Generator* generator, const TensorOptions& options) {
-  auto tensor = native::empty(n, options);
+  auto tensor = at::empty(n, options);
   return at::randperm_out(tensor, n, generator);
 }
 
@@ -476,7 +485,7 @@ Tensor range(
     Scalar step,
     const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._range(start, end, step);
+  return getFactoryType(options)._range(start, end, step);
 }
 
 Tensor& range_out(Tensor& result, Scalar start, Scalar end) {
@@ -490,7 +499,7 @@ Tensor& range_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor zeros(IntList size, const TensorOptions& options) {
-  auto result = native::empty(size, options);
+  auto result = at::empty(size, options);
   return result.zero_();
 }
 
@@ -510,7 +519,7 @@ Tensor zeros_like(const Tensor& self) {
 
 Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
-    auto res = native::empty({0}, options); // to be resized
+    auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
     return res;
   }
@@ -529,7 +538,7 @@ Tensor bartlett_window(
     const TensorOptions& options) {
   window_function_checks("bartlett_window", options, window_length);
   if (window_length == 0) {
-    return native::empty({0}, options);
+    return at::empty({0}, options);
   }
   if (window_length == 1) {
     return native::ones({1}, options);
@@ -597,7 +606,7 @@ Tensor hamming_window(
     const TensorOptions& options) {
   window_function_checks("hamming_window", options, window_length);
   if (window_length == 0) {
-    return native::empty({0}, options);
+    return at::empty({0}, options);
   }
   if (window_length == 1) {
     return native::ones({1}, options);
