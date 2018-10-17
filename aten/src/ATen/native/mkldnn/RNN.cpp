@@ -115,7 +115,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn_cell(
   auto train = true;
 
   auto rnn_prop = train ? prop_kind::forward_training : prop_kind::forward_inference;
-  auto rnn_algo = (cx.defined()) ? algorithm::vanilla_lstm :gru_linear_before_reset;
+  auto rnn_algo = (cx.defined()) ? algorithm::vanilla_lstm : algorithm::vanilla_gru;
   auto rnn_dir = rnn_direction::unidirectional_left2right;
 
   memory::dims input_tz = {time_step, batch_size, input_size};
@@ -251,7 +251,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_cell_backward
   auto grad_bias = at::empty_like(bias);
 
   auto rnn_prop = prop_kind::backward;
-  auto rnn_algo = (cx.defined()) ? algorithm::vanilla_lstm :gru_linear_before_reset;
+  auto rnn_algo = (cx.defined()) ? algorithm::vanilla_lstm : algorithm::vanilla_gru;
   auto rnn_dir = rnn_direction::unidirectional_left2right;
 
   memory::dims input_tz = {time_step, batch_size, input_size};
