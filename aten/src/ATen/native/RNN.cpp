@@ -162,6 +162,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>> {
       return std::make_tuple(std::get<0>(result), std::get<1>(result));
     }
 
+    //bool use_mkldnn = false;
     bool use_mkldnn = true;
     if (use_mkldnn) {
       std::vector<Tensor> weight;

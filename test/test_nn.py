@@ -3964,6 +3964,48 @@ class TestNN(NNTestCase):
 
             (hx + cx).sum().backward()
 
+    def test_MKLDNN_LSTM_cell(self):
+        # this is a test to check MKLDNN LSTM result
+        def LSTM_native(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
+            hx, cx = hidden
+            gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
+            ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+            ingate = torch.sigmoid(ingate)
+            forgetgate = torch.sigmoid(forgetgate)
+            cellgate = torch.tanh(cellgate)
+            outgate = torch.sigmoid(outgate)
+            cy = (forgetgate * cx) + (ingate * cellgate)
+            hy = outgate * torch.tanh(cy)
+            return hy, cy
+        print("test_MKLDNN_LSTM_cell start")
+        batch_size = 2
+        input_size = 4
+        hidden_size = 4
+        bias = True
+        rnn = nn.LSTMCell(input_size, hidden_size, bias)
+        input = torch.randn(batch_size, input_size)
+        hx = torch.randn(batch_size, hidden_size)
+        cx = torch.randn(batch_size, hidden_size)
+        weight = {}
+        for name, param in rnn.named_parameters():
+            weight[name] = param
+        #print(weight)
+        w_ih = weight["weight_ih"]
+        w_hh = weight["weight_hh"]
+        b_ih = weight["bias_ih"]
+        b_hh = weight["bias_hh"]
+        #print(w_ih)
+        #print(w_hh)
+        #print(b_ih)
+        #print(b_hh)
+        output_nn = rnn(input, (hx, cx))
+        print("output_nn = ", output_nn)
+        output_native = LSTM_native(input, (hx, cx), w_ih, w_hh, b_ih, b_hh)
+        print("output_native = ", output_native)
+        self.assertEqual(output_nn, output_native)
+
+            
+
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
     @skipIfRocm
     def test_cudnn_rnn_dropout_states_device(self):
