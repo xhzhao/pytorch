@@ -1107,6 +1107,12 @@
 - func: mkldnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, Tensor save_mean, Tensor save_var, double epsilon) -> (Tensor, Tensor, Tensor)
   variants: function
 
+- func: mkldnn_pooling(Tensor input, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode=false) -> (Tensor, Tensor)
+  variants: function
+
+- func: mkldnn_pooling_backward(Tensor input, Tensor grad_output, Tensor indice, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode) -> Tensor
+  variants: function
+
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double exponential_average_factor, double epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:
     CUDA: miopen_batch_norm

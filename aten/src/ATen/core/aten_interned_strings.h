@@ -454,6 +454,8 @@ _(aten, mkldnn_relu_) \
 _(aten, mkldnn_relu_backward) \
 _(aten, mkldnn_batch_norm) \
 _(aten, mkldnn_batch_norm_backward) \
+_(aten, mkldnn_pooling) \
+_(aten, mkldnn_pooling_backward) \
 _(aten, mm) \
 _(aten, mode) \
 _(aten, mse_loss) \
