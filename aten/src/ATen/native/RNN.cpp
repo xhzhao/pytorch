@@ -164,7 +164,9 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>> {
 
     //bool use_mkldnn = false;
     bool use_mkldnn = true;
-    if (use_mkldnn) {
+    //if (use_mkldnn) {
+    if (at::userEnabledMKLDNN()) {
+      std::cout<< "enable mkldnn for LSTMCell" << std::endl;
       std::vector<Tensor> weight;
       weight.emplace_back(params.w_ih);
       weight.emplace_back(params.w_hh);
