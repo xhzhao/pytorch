@@ -3978,27 +3978,28 @@ class TestNN(NNTestCase):
             hy = outgate * torch.tanh(cy)
             return hy, cy
         print("test_MKLDNN_LSTM_cell start")
-        batch_size = 2
-        input_size = 4
-        hidden_size = 4
-        bias = True
-        rnn = nn.LSTMCell(input_size, hidden_size, bias).float()
-        input = torch.randn(batch_size, input_size, dtype=torch.float)
-        hx = torch.randn(batch_size, hidden_size, dtype=torch.float)
-        cx = torch.randn(batch_size, hidden_size, dtype=torch.float)
-        weight = {}
-        for name, param in rnn.named_parameters():
-            weight[name] = param
-        #print(weight)
-        w_ih = weight["weight_ih"]
-        w_hh = weight["weight_hh"]
-        b_ih = weight["bias_ih"]
-        b_hh = weight["bias_hh"]
-        output_nn = rnn(input, (hx, cx))
-        #print("output_nn = ", output_nn)
-        output_native = LSTM_native(input, (hx, cx), w_ih, w_hh, b_ih, b_hh)
-        #print("output_native = ", output_native)
-        self.assertEqual(output_nn, output_native)
+        sizes = [(1, 4, 4),
+                 (4, 10, 20),
+                 (64,500,500)]
+        for (batch_size, input_size, hidden_size) in sizes:
+            bias = True
+            rnn = nn.LSTMCell(input_size, hidden_size, bias).float()
+            input = torch.randn(batch_size, input_size, dtype=torch.float)
+            hx = torch.randn(batch_size, hidden_size, dtype=torch.float)
+            cx = torch.randn(batch_size, hidden_size, dtype=torch.float)
+            weight = {}
+            for name, param in rnn.named_parameters():
+                weight[name] = param
+            #print(weight)
+            w_ih = weight["weight_ih"]
+            w_hh = weight["weight_hh"]
+            b_ih = weight["bias_ih"]
+            b_hh = weight["bias_hh"]
+            output_nn = rnn(input, (hx, cx))
+            #print("output_nn = ", output_nn)
+            output_native = LSTM_native(input, (hx, cx), w_ih, w_hh, b_ih, b_hh)
+            #print("output_native = ", output_native)
+            self.assertEqual(output_nn, output_native)
 
             
 
