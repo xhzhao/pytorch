@@ -3982,10 +3982,10 @@ class TestNN(NNTestCase):
         input_size = 4
         hidden_size = 4
         bias = True
-        rnn = nn.LSTMCell(input_size, hidden_size, bias)
-        input = torch.randn(batch_size, input_size)
-        hx = torch.randn(batch_size, hidden_size)
-        cx = torch.randn(batch_size, hidden_size)
+        rnn = nn.LSTMCell(input_size, hidden_size, bias).float()
+        input = torch.randn(batch_size, input_size, dtype=torch.float)
+        hx = torch.randn(batch_size, hidden_size, dtype=torch.float)
+        cx = torch.randn(batch_size, hidden_size, dtype=torch.float)
         weight = {}
         for name, param in rnn.named_parameters():
             weight[name] = param
@@ -3994,14 +3994,10 @@ class TestNN(NNTestCase):
         w_hh = weight["weight_hh"]
         b_ih = weight["bias_ih"]
         b_hh = weight["bias_hh"]
-        #print(w_ih)
-        #print(w_hh)
-        #print(b_ih)
-        #print(b_hh)
         output_nn = rnn(input, (hx, cx))
-        print("output_nn = ", output_nn)
+        #print("output_nn = ", output_nn)
         output_native = LSTM_native(input, (hx, cx), w_ih, w_hh, b_ih, b_hh)
-        print("output_native = ", output_native)
+        #print("output_native = ", output_native)
         self.assertEqual(output_nn, output_native)
 
             

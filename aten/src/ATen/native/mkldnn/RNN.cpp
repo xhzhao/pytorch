@@ -58,14 +58,7 @@ namespace {
   // b) for LSTM, mkldnn gate order is (forget, input, output, cell), different
   // from pytorch native (input, forget, cell, output)
   Tensor _shuffle_gates(const Tensor& weight, int64_t num_gates, bool forward=true) {
-    auto is_bias = (weight.dim() == 1);
-    auto weight_t = is_bias ? weight : weight.t();
-    if (num_gates == 4) {
-      auto _dim = is_bias ? ldgo_shffule_dim: forward ? ldigo_shuffle_dim : ldgoi_shuffle_dim;
-      std::vector<Tensor> gates = weight_t.chunk(num_gates, _dim);
-      return at::cat({gates[1], gates[0], gates[3], gates[2]}, _dim);
-    }
-    return weight_t.contiguous();
+    return weight.contiguous();
   }
 
 } // anonymous namespace
@@ -108,9 +101,12 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn_cell(
   auto format_ldgo = memory::format::ldgo;
   auto format_ldsnc = memory::format::ldsnc;
 
-  auto weight_ih = _shuffle_gates(weight[0], num_gates);
-  auto weight_hh = _shuffle_gates(weight[1], num_gates);
-  auto bias = _shuffle_gates(weight[2] + weight[3], num_gates);
+  //auto weight_ih = _shuffle_gates(weight[0], num_gates);
+  //auto weight_hh = _shuffle_gates(weight[1], num_gates);
+  auto weight_ih = weight[0].t().clone();
+  auto weight_hh = weight[1].t().clone();
+  auto bias = weight[2] + weight[3];
+
 
   auto train = true;
 
