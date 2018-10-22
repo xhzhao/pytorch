@@ -3985,7 +3985,26 @@ class TestNN(NNTestCase):
 
             self.assertEqual(output, output_mkldnn)
 
-            
+    def test_MKLDNN_LSTM(self):
+        # this is a test to check MKLDNN LSTM result
+        print("test_MKLDNN_LSTM start")
+        sizes = [(1, 1, 4, 4),
+                 (2, 4, 10, 20),
+                 (50, 64, 500, 500)]
+        for (seq_length,batch_size, input_size, hidden_size) in sizes:
+            bias = True
+            torch._C._set_mkldnn_enabled(False)
+            rnn = nn.LSTM(input_size, hidden_size).float()
+            input = torch.randn(seq_length, batch_size, input_size, dtype=torch.float)
+            hx = torch.randn(1, batch_size, hidden_size, dtype=torch.float)
+            cx = torch.randn(1, batch_size, hidden_size, dtype=torch.float)
+            output = rnn(input, (hx, cx))
+
+            #torch._C._set_mkldnn_enabled(True)
+            #rnn_mkldnn = deepcopy(rnn)
+            #output_mkldnn = rnn_mkldnn(input, (hx, cx))
+
+            #self.assertEqual(output, output_mkldnn)
 
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
     @skipIfRocm

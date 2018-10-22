@@ -162,9 +162,6 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>> {
       return std::make_tuple(std::get<0>(result), std::get<1>(result));
     }
 
-    //bool use_mkldnn = false;
-    bool use_mkldnn = true;
-    //if (use_mkldnn) {
     if (at::userEnabledMKLDNN()) {
       std::cout<< "enable mkldnn for LSTMCell" << std::endl;
       std::vector<Tensor> weight;
@@ -173,8 +170,9 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>> {
       weight.emplace_back(params.b_ih);
       weight.emplace_back(params.b_hh);
       auto result = at::mkldnn_rnn_cell(input, weight, hx, cx);
-#if 0
-      // debug
+      return std::make_tuple(std::get<0>(result), std::get<1>(result));
+    } else {
+      std::cout<< "disable mkldnn for LSTMCell" << std::endl;
       auto gates = at::linear(input, params.w_ih, params.b_ih) + at::linear(hx, params.w_hh, params.b_hh);
       auto chunked_gates = gates.chunk(4, 1);
 
@@ -186,32 +184,8 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>> {
       auto cy = (forgetgate * cx) + (ingate * cellgate);
       auto hy = outgate * cy.tanh();
 
-      auto hy_ = std::get<0>(result);
-      auto cy_ = std::get<1>(result);
-
-      //std::cout << "cy sum " << cy.sum() << std::endl;
-      //std::cout << "hy sum " << hy.sum() << std::endl;
-      //std::cout << "cy_ sum " << cy_.sum() << std::endl;
-      //std::cout << "hy_ sum " << hy_.sum() << std::endl;
-
-      std::cout << "cy max diff: " << (cy - cy_).abs().max() << std::endl;
-      std::cout << "hy max diff: " << (hy - hy_).abs().max() << std::endl;
-#endif
-      return std::make_tuple(std::get<0>(result), std::get<1>(result));
+      return std::make_tuple(hy, cy);
     }
-
-    auto gates = at::linear(input, params.w_ih, params.b_ih) + at::linear(hx, params.w_hh, params.b_hh);
-    auto chunked_gates = gates.chunk(4, 1);
-
-    auto ingate = chunked_gates[0].sigmoid();
-    auto forgetgate = chunked_gates[1].sigmoid();
-    auto cellgate = chunked_gates[2].tanh();
-    auto outgate = chunked_gates[3].sigmoid();
-
-    auto cy = (forgetgate * cx) + (ingate * cellgate);
-    auto hy = outgate * cy.tanh();
-
-    return std::make_tuple(hy, cy);
   }
 };
 
@@ -271,13 +245,19 @@ struct FullLayer : Layer<Tensor, hidden_type, CellParams> {
     : cell_(cell) {};
 
   unstacked_output_type operator()(std::vector<Tensor> step_inputs, const hidden_type& input_hidden, const CellParams& params) const {
-    std::vector<Tensor> step_outputs;
-    auto hidden = input_hidden;
-    for (size_t i = 0; i < step_inputs.size(); i++) {
-      hidden = cell_(step_inputs[i], hidden, params);
-      step_outputs.push_back(hidden_as_output(hidden));
+
+    if (at::userEnabledMKLDNN()) {
+      std::cout<< "enable mkldnn for RNN, type = "<< getCellType() << std::endl;
+    } else {
+      std::cout<< "disable mkldnn for RNN, type = "<< getCellType() << std::endl;
+      std::vector<Tensor> step_outputs;
+      auto hidden = input_hidden;
+      for (size_t i = 0; i < step_inputs.size(); i++) {
+        hidden = cell_(step_inputs[i], hidden, params);
+        step_outputs.push_back(hidden_as_output(hidden));
+      }
+      return {step_outputs, hidden};
     }
-    return {step_outputs, hidden};
   }
 
   output_type operator()(const Tensor& inputs, const hidden_type& input_hidden, const CellParams& params) const override {
@@ -286,6 +266,17 @@ struct FullLayer : Layer<Tensor, hidden_type, CellParams> {
   }
 
   Cell<hidden_type>& cell_;
+  enum CellType { RNN, LSTM, GRU};
+  CellType getCellType() const{
+    CellType type = RNN;
+    if (dynamic_cast<LSTMCell *>(&cell_) != NULL) {
+        type = LSTM;
+    } else if (dynamic_cast<GRUCell *>(&cell_) != NULL) {
+        type = GRU;
+    }
+    return type;
+  }
+
 };
 
 template<typename dir_hidden_type>
@@ -590,6 +581,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   AT_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  std::cout <<"lstm called in aten 1: batched input" << std::endl;
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
@@ -611,6 +603,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   AT_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  std::cout <<"lstm called in aten 2: packed input" << std::endl;
   if (at::cudnn_is_acceptable(data)) {
     Tensor output, hy, cy;
     lstm_packed_cudnn_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
