@@ -3,10 +3,27 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/TensorUtils.h"
 #include "ATen/core/Error.h"
+#include "ATen/Config.h"
 
 #include <tuple>
+#include <stdlib.h>
 
 namespace at { namespace native {
+
+static inline std::vector<int64_t> pooling_expand_param_if_needed(
+  IntList list_param, const char *param_name, int64_t expected_dim) {
+  if (list_param.size() == 1) {
+    return std::vector<int64_t>(expected_dim, list_param[0]);
+  } else if ((int64_t) list_param.size() != expected_dim) {
+    std::ostringstream ss;
+    ss << "expected " << param_name << " to be a single integer value or a "
+       << "list of " << expected_dim << " values to match the pooling "
+       << "dimensions, but got " << param_name << "=" << list_param;
+     AT_ERROR(ss.str());
+  } else {
+    return list_param.vec();
+  }
+}
 
 static void check1d(
     const char* function_name,
@@ -114,9 +131,38 @@ Tensor max_pool2d(
     IntList padding,
     IntList dilation,
     bool ceil_mode) {
-  auto output_and_indices = at::max_pool2d_with_indices(
-      self, kernel_size, stride, padding, dilation, ceil_mode);
-  return std::get<0>(output_and_indices);
+  bool is_dilated = false;
+  for (auto d : dilation) {
+    is_dilated |= (d != 1);
+  }
+ bool use_mkldnn = false;
+#if AT_MKLDNN_ENABLED()
+  use_mkldnn = (self.type().backend() == at::Backend::CPU
+               && self.type().scalarType() == at::kFloat // only on CPU Float Tensors
+               && (self.ndimension() == 4)
+               && !is_dilated // not support dilation
+               );
+#endif
+  if (use_mkldnn) {
+#if AT_MKLDNN_ENABLED()
+    auto k = self.ndimension();
+    auto dim = k - 2;
+    auto kernel_size_ = pooling_expand_param_if_needed(kernel_size, "kernel_size", dim);
+    std::vector<int64_t> stride_(dim);
+    if (stride.size() == 0) {
+      stride_ = kernel_size_;
+    } else {
+      stride_ = pooling_expand_param_if_needed(stride, "stride", dim);
+    }
+    auto padding_ = pooling_expand_param_if_needed(padding, "padding", dim);
+    auto output_and_indices = at::mkldnn_pooling(self.contiguous(), kernel_size_, stride_, padding_, ceil_mode);
+    return std::get<0>(output_and_indices);
+#endif
+  } else {
+    auto output_and_indices = at::max_pool2d_with_indices(
+        self, kernel_size, stride, padding, dilation, ceil_mode);
+    return std::get<0>(output_and_indices);
+  }
 }
 
 Tensor max_pool3d(
@@ -126,9 +172,38 @@ Tensor max_pool3d(
     IntList padding,
     IntList dilation,
     bool ceil_mode) {
-  auto output_and_indices = at::max_pool3d_with_indices(
-      self, kernel_size, stride, padding, dilation, ceil_mode);
-  return std::get<0>(output_and_indices);
+ bool is_dilated = false;
+ for (auto d : dilation) {
+   is_dilated |= (d != 1);
+ }
+ bool use_mkldnn = false;
+#if AT_MKLDNN_ENABLED()
+  use_mkldnn = (self.type().backend() == at::Backend::CPU
+               && self.type().scalarType() == at::kFloat // only on CPU Float Tensors
+               && (self.ndimension() == 5)
+               && !is_dilated // not support dilation
+               );
+#endif
+  if (use_mkldnn) {
+#if AT_MKLDNN_ENABLED()
+    auto k = self.ndimension();
+    auto dim = k - 2;
+    auto kernel_size_ = pooling_expand_param_if_needed(kernel_size, "kernel_size", dim);
+    std::vector<int64_t> stride_(dim);
+    if (stride.size() == 0) {
+      stride_ = kernel_size_;
+    } else {
+      stride_ = pooling_expand_param_if_needed(stride, "stride", dim);
+    }
+    auto padding_ = pooling_expand_param_if_needed(padding, "padding", dim);
+    auto output_and_indices = at::mkldnn_pooling(self.contiguous(), kernel_size_, stride_, padding_, ceil_mode);
+    return std::get<0>(output_and_indices);
+#endif
+  } else {
+    auto output_and_indices = at::max_pool3d_with_indices(
+        self, kernel_size, stride, padding, dilation, ceil_mode);
+    return std::get<0>(output_and_indices);
+  }
 }
 } // namespace native
 } // namespace at
