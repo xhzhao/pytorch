@@ -236,6 +236,36 @@ struct Layer {
   virtual output_type operator()(const io_type& input, const hidden_type& input_hidden, const param_type& params) const = 0;
 };
 
+template <typename hidden_type>
+struct MkldnnRNNWrapper {
+  std::tuple<Tensor, Tensor, Tensor> rnn_forward(std::vector<Tensor> step_inputs,
+    const hidden_type& hidden, const CellParams& params, int64_t celltype) {
+      std::vector<Tensor> weight;
+      weight.emplace_back(params.w_ih);
+      weight.emplace_back(params.w_hh);
+      weight.emplace_back(params.b_ih);
+      weight.emplace_back(params.b_hh);
+      auto input = at::stack(step_inputs);
+      auto result = at::mkldnn_rnn(input, weight, hidden, celltype);
+  }
+};
+
+template <>
+struct MkldnnRNNWrapper <std::tuple<Tensor,Tensor>> {
+  std::tuple<Tensor, Tensor, Tensor> rnn_forward(std::vector<Tensor> step_inputs,
+    const std::tuple<Tensor,Tensor> hidden, const CellParams& params, int64_t celltype) {
+      auto hx = std::get<0>(hidden);
+      auto cx = std::get<1>(hidden);
+      std::vector<Tensor> weight;
+      weight.emplace_back(params.w_ih);
+      weight.emplace_back(params.w_hh);
+      weight.emplace_back(params.b_ih);
+      weight.emplace_back(params.b_hh);
+      auto input = at::stack(step_inputs);
+      auto result = at::mkldnn_rnn_lstm(input, weight, hx, cx, celltype);
+  }
+};
+
 template<typename hidden_type>
 struct FullLayer : Layer<Tensor, hidden_type, CellParams> {
   using output_type = typename Layer<Tensor, hidden_type, CellParams>::output_type;
@@ -247,7 +277,12 @@ struct FullLayer : Layer<Tensor, hidden_type, CellParams> {
   unstacked_output_type operator()(std::vector<Tensor> step_inputs, const hidden_type& input_hidden, const CellParams& params) const {
 
     if (at::userEnabledMKLDNN()) {
-      std::cout<< "enable mkldnn for RNN, type = "<< getCellType() << std::endl;
+      CellType celltype = getCellType();
+      std::cout<< "enable mkldnn for RNN, type = "<< celltype << std::endl;
+
+      MkldnnRNNWrapper<hidden_type> mkldnnwrapper;
+      mkldnnwrapper.rnn_forward(step_inputs,input_hidden,params, (int64_t)celltype);
+
     } else {
       std::cout<< "disable mkldnn for RNN, type = "<< getCellType() << std::endl;
       std::vector<Tensor> step_outputs;

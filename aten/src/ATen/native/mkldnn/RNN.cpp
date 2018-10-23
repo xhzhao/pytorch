@@ -63,6 +63,35 @@ namespace {
 
 } // anonymous namespace
 
+std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
+    const Tensor& input, TensorList weight, const Tensor& hx,const Tensor& cx,
+    int64_t celltype) {
+  auto hy = at::empty_like(input);
+  auto cy = at::empty_like(hy);
+  auto workspace = at::empty_like(hy);
+  return std::make_tuple(hy, cy, workspace);
+}
+
+std::tuple<Tensor, Tensor> mkldnn_rnn(
+    const Tensor& input, TensorList weight, const Tensor& hidden,
+    int64_t celltype) {
+  auto hy = at::empty_like(input);
+  auto workspace = at::empty_like(hy);
+  return std::make_tuple(hy, workspace);
+}
+
+std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward(
+    const Tensor& input, TensorList weight, const Tensor& hx, const Tensor& cx,
+    const Tensor& hy, const Tensor& cy, const Tensor& grad_hy, const Tensor& grad_cy,
+    const Tensor& workspace, int64_t celltype) {
+}
+
+std::tuple<Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
+    const Tensor& input, TensorList weight, const Tensor& hx,
+    const Tensor& hy, const Tensor& grad_hy,
+    const Tensor& workspace, int64_t celltype) {
+}
+
 std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn_cell(
     const Tensor& input, TensorList weight, const Tensor& hx, const Tensor& cx) {
   // NB: MKLDNN requires to concat hx and cx for lstm
