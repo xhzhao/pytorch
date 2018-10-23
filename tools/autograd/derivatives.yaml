@@ -935,11 +935,11 @@
 - name: adaptive_max_pool3d_forward(Tensor self, IntList output_size)
   self: adaptive_max_pool3d_backward(grad, self, indices)
 
-- name: avg_pool2d_forward(Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
-  self: avg_pool2d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
+- name: thnn_avg_pool2d_forward(Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
+  self: thnn_avg_pool2d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
 
-- name: avg_pool3d_forward(Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
-  self: avg_pool3d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
+- name: thnn_avg_pool3d_forward(Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
+  self: thnn_avg_pool3d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
 
 - name: fractional_max_pool2d_forward(Tensor self, IntList kernel_size, IntList output_size, Tensor random_samples)
   self: fractional_max_pool2d_backward(grad, self, kernel_size, output_size, indices)
@@ -1025,12 +1025,12 @@
   grad_output: max_pool_double_backward(grad, indices, 3)
   self: zeros_like(self)
 
-- name: avg_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
-  grad_output: avg_pool2d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
+- name: thnn_avg_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
+  grad_output: thnn_avg_pool2d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
   self: zeros_like(self)
 
-- name: avg_pool3d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
-  grad_output: avg_pool3d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
+- name: thnn_avg_pool3d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
+  grad_output: thnn_avg_pool3d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
   self: zeros_like(self)
 
 - name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output)
@@ -1262,8 +1262,8 @@
 - name: mkldnn_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double exponential_average_factor, double epsilon)
   input, weight, bias: mkldnn_batch_norm_backward(input, grad.contiguous(), weight, bias, running_mean, running_var, result1, result2, epsilon)
 
-- name: mkldnn_pooling(Tensor input, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode)
-  input: mkldnn_pooling_backward(input, grad, result1, kernel_size, stride, padding, ceil_mode)
+- name: mkldnn_pooling(Tensor input, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad, bool avg)
+  input: mkldnn_pooling_backward(input, grad, result1, kernel_size, stride, padding, ceil_mode, count_include_pad, avg)
 
 # fft
 - name: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes)

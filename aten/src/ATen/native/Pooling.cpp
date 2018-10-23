@@ -6,7 +6,6 @@
 #include "ATen/Config.h"
 
 #include <tuple>
-#include <stdlib.h>
 
 namespace at { namespace native {
 
@@ -101,7 +100,7 @@ Tensor avg_pool1d(
   check1d("avg_pool1d", "stride", stride);
   check1d("avg_pool1d", "padding", padding);
 
-  auto output = at::avg_pool2d(
+  auto output = at::thnn_avg_pool2d(
       self.unsqueeze(2),
       {1, kernel_size[0]},
       {1, stride[0]},
@@ -110,6 +109,74 @@ Tensor avg_pool1d(
       count_include_pad);
 
   return output.squeeze(2);
+}
+
+Tensor avg_pool2d(
+    const Tensor& self,
+    IntList kernel_size,
+    IntList stride,
+    IntList padding,
+    bool ceil_mode,
+    bool count_include_pad) {
+ bool use_mkldnn = false;
+#if AT_MKLDNN_ENABLED()
+  use_mkldnn = (self.type().backend() == at::Backend::CPU
+               && self.type().scalarType() == at::kFloat // only on CPU Float Tensors
+               && (self.ndimension() == 4)
+               );
+#endif
+  if (use_mkldnn) {
+#if AT_MKLDNN_ENABLED()
+    auto k = self.ndimension();
+    auto dim = k - 2;
+    auto kernel_size_ = pooling_expand_param_if_needed(kernel_size, "kernel_size", dim);
+    std::vector<int64_t> stride_(dim);
+    if (stride.empty()) {
+      stride_ = kernel_size_;
+    } else {
+      stride_ = pooling_expand_param_if_needed(stride, "stride", dim);
+    }
+    auto padding_ = pooling_expand_param_if_needed(padding, "padding", dim);
+    auto output_and_indices = at::mkldnn_pooling(self.contiguous(), kernel_size_, stride_, padding_, ceil_mode, count_include_pad, true);
+    return std::get<0>(output_and_indices);
+#endif
+  } else {
+    return at::thnn_avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad);
+  }
+}
+
+Tensor avg_pool3d(
+    const Tensor& self,
+    IntList kernel_size,
+    IntList stride,
+    IntList padding,
+    bool ceil_mode,
+    bool count_include_pad) {
+ bool use_mkldnn = false;
+#if AT_MKLDNN_ENABLED()
+  use_mkldnn = (self.type().backend() == at::Backend::CPU
+               && self.type().scalarType() == at::kFloat // only on CPU Float Tensors
+               && (self.ndimension() == 5)
+               );
+#endif
+  if (use_mkldnn) {
+#if AT_MKLDNN_ENABLED()
+    auto k = self.ndimension();
+    auto dim = k - 2;
+    auto kernel_size_ = pooling_expand_param_if_needed(kernel_size, "kernel_size", dim);
+    std::vector<int64_t> stride_(dim);
+    if (stride.empty()) {
+      stride_ = kernel_size_;
+    } else {
+      stride_ = pooling_expand_param_if_needed(stride, "stride", dim);
+    }
+    auto padding_ = pooling_expand_param_if_needed(padding, "padding", dim);
+    auto output_and_indices = at::mkldnn_pooling(self.contiguous(), kernel_size_, stride_, padding_, ceil_mode, count_include_pad, true);
+    return std::get<0>(output_and_indices);
+#endif
+  } else {
+    return at::thnn_avg_pool3d(self, kernel_size, stride, padding, ceil_mode, count_include_pad);
+  }
 }
 
 Tensor max_pool1d(
@@ -149,13 +216,13 @@ Tensor max_pool2d(
     auto dim = k - 2;
     auto kernel_size_ = pooling_expand_param_if_needed(kernel_size, "kernel_size", dim);
     std::vector<int64_t> stride_(dim);
-    if (stride.size() == 0) {
+    if (stride.empty()) {
       stride_ = kernel_size_;
     } else {
       stride_ = pooling_expand_param_if_needed(stride, "stride", dim);
     }
     auto padding_ = pooling_expand_param_if_needed(padding, "padding", dim);
-    auto output_and_indices = at::mkldnn_pooling(self.contiguous(), kernel_size_, stride_, padding_, ceil_mode);
+    auto output_and_indices = at::mkldnn_pooling(self.contiguous(), kernel_size_, stride_, padding_, ceil_mode, false, false);
     return std::get<0>(output_and_indices);
 #endif
   } else {
@@ -190,13 +257,13 @@ Tensor max_pool3d(
     auto dim = k - 2;
     auto kernel_size_ = pooling_expand_param_if_needed(kernel_size, "kernel_size", dim);
     std::vector<int64_t> stride_(dim);
-    if (stride.size() == 0) {
+    if (stride.empty()) {
       stride_ = kernel_size_;
     } else {
       stride_ = pooling_expand_param_if_needed(stride, "stride", dim);
     }
     auto padding_ = pooling_expand_param_if_needed(padding, "padding", dim);
-    auto output_and_indices = at::mkldnn_pooling(self.contiguous(), kernel_size_, stride_, padding_, ceil_mode);
+    auto output_and_indices = at::mkldnn_pooling(self.contiguous(), kernel_size_, stride_, padding_, ceil_mode, false, false);
     return std::get<0>(output_and_indices);
 #endif
   } else {
