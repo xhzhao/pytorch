@@ -63,21 +63,126 @@ namespace {
 
 } // anonymous namespace
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
+std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
     const Tensor& input, TensorList weight, const Tensor& hx,const Tensor& cx,
     int64_t celltype) {
-  auto hy = at::empty_like(input);
-  auto cy = at::empty_like(hy);
-  auto workspace = at::empty_like(hy);
-  return std::make_tuple(hy, cy, workspace);
+  std::cout<<"mkldnn_rnn_lstm call start"<< std::endl;
+  Tensor hidden_in, hidden_out, hy, cy;
+  hidden_in = at::cat({hx, cx}, 0);
+  hidden_out = at::empty_like(hidden_in);
+  std::vector<Tensor> hidden_arr = hidden_out.chunk(2, 0);
+  hy = hidden_arr[0];
+  cy = hidden_arr[1];
+
+  auto workspace = at::empty({0}, input.options());
+  auto cpu_engine = CpuEngine::Instance().get_engine();
+  auto null_memory_ = null_memory(cpu_engine);
+
+  int32_t time_step = input.size(0);
+  int32_t batch_size = input.size(1);
+  int32_t input_size = input.size(2);
+  int32_t hidden_size = hx.size(1);
+  
+  Tensor output ;
+  if (time_step == 1) {
+    output = at::zeros({batch_size, hidden_size});
+  } else {
+    output = at::empty_like(input);
+  }
+
+  std::cout<<"T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
+
+  int32_t num_layers = 1;
+  int32_t num_directions = 1;
+  int32_t num_gates = 4;
+  int32_t num_states = 2;
+
+  auto format_tnc = memory::format::tnc;
+  auto format_ldigo = memory::format::ldigo;
+  auto format_ldgo = memory::format::ldgo;
+  auto format_ldsnc = memory::format::ldsnc;
+
+  auto weight_ih = weight[0].t().clone();
+  auto weight_hh = weight[1].t().clone();
+  auto bias = weight[2] + weight[3];
+
+
+  auto train = true;
+
+  auto rnn_prop = train ? prop_kind::forward_training : prop_kind::forward_inference;
+  auto rnn_algo = (cx.defined()) ? algorithm::vanilla_lstm : algorithm::vanilla_gru;
+  auto rnn_dir = rnn_direction::unidirectional_left2right;
+
+
+  memory::dims input_tz = {time_step, batch_size, input_size};
+  memory::dims weight_ih_tz = {num_layers, num_directions, input_size, num_gates, hidden_size};
+  memory::dims weight_hh_tz = {num_layers, num_directions, hidden_size, num_gates, hidden_size};
+  memory::dims bias_tz = {num_layers, num_directions, num_gates, hidden_size};
+  memory::dims hidden_tz = {num_layers, num_directions, num_states, batch_size, hidden_size};
+  memory::dims output_tz = {time_step, batch_size, hidden_size};
+
+  auto input_md = _format_md(input_tz, format_tnc);
+  auto hidden_md = _generic_md(hidden_tz);
+  auto weight_ih_md = _generic_md(weight_ih_tz);
+  auto weight_hh_md = _generic_md(weight_hh_tz);
+  auto bias_md = _generic_md(bias_tz);
+  auto output_md = _format_md(output_tz, format_tnc);
+
+  auto rnn_cell_ = rnn_cell::desc(rnn_algo);
+try {
+  auto rnn_forward_desc = rnn_forward::desc(rnn_prop, rnn_cell_, rnn_dir,
+    input_md, hidden_md, weight_ih_md, weight_hh_md, bias_md, output_md, hidden_md);
+
+  auto rnn_forward_pd = rnn_forward::primitive_desc(rnn_forward_desc, cpu_engine);
+
+  auto input_usr_mem = memory({input_md, cpu_engine}, input.data_ptr());
+  auto hidden_in_usr_mem = memory({_format_md(hidden_tz, format_ldsnc), cpu_engine}, hidden_in.data_ptr());
+  auto weight_ih_usr_mem = memory({_format_md(weight_ih_tz, format_ldigo), cpu_engine}, weight_ih.data_ptr());
+  auto weight_hh_usr_mem = memory({_format_md(weight_hh_tz, format_ldigo), cpu_engine}, weight_hh.data_ptr());
+  auto bias_usr_mem = memory({_format_md(bias_tz, format_ldgo), cpu_engine}, bias.data_ptr());
+  auto output_usr_mem = memory({output_md, cpu_engine}, output.data_ptr());
+  auto hidden_out_usr_mem = memory({_format_md(hidden_tz, format_ldsnc), cpu_engine}, hidden_out.data_ptr());
+
+  auto workspace_mem = null_memory_;
+  if (train) {
+    auto workspace_pd = rnn_forward_pd.workspace_primitive_desc();
+    auto workspace_size = workspace_pd.get_size();
+    workspace.resize_(workspace_size);
+    workspace_mem = memory(workspace_pd, workspace.data_ptr());
+  }
+
+  auto input_mem = _reorder(input_usr_mem, rnn_forward_pd.src_layer_primitive_desc());
+  auto hidden_in_mem = _reorder(hidden_in_usr_mem, rnn_forward_pd.src_iter_primitive_desc());
+  auto weight_ih_mem = _reorder(weight_ih_usr_mem, rnn_forward_pd.weights_layer_primitive_desc());
+  auto weight_hh_mem = _reorder(weight_hh_usr_mem, rnn_forward_pd.weights_iter_primitive_desc());
+  auto bias_mem = _reorder(bias_usr_mem, rnn_forward_pd.bias_primitive_desc());
+  auto output_mem = _reorder(output_usr_mem, rnn_forward_pd.dst_layer_primitive_desc());
+  auto hidden_out_mem = _reorder(hidden_out_usr_mem, rnn_forward_pd.dst_iter_primitive_desc());
+
+  std::vector<primitive> net;
+  net.push_back(rnn_forward(rnn_forward_pd, input_mem, hidden_in_mem, weight_ih_mem, weight_hh_mem,
+    bias_mem, output_mem, hidden_out_mem, workspace_mem));
+
+  if (hidden_out_mem != hidden_out_usr_mem) {
+    net.push_back(reorder(hidden_out_mem, hidden_out_usr_mem));
+  }
+
+  Stream::Instance().get_stream().submit(net);
+
+  } catch (error &e) {
+    std::cerr << "message: " << e.message << std::endl;
+  }
+ 
+  return std::make_tuple(output, hy, cy, workspace);
 }
 
-std::tuple<Tensor, Tensor> mkldnn_rnn(
+std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
     const Tensor& input, TensorList weight, const Tensor& hidden,
     int64_t celltype) {
   auto hy = at::empty_like(input);
+  auto output = at::empty_like(input);
   auto workspace = at::empty_like(hy);
-  return std::make_tuple(hy, workspace);
+  return std::make_tuple(output, hy, workspace);
 }
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward(
