@@ -361,8 +361,10 @@ try{
   std::vector<Tensor> grad_weights;
   grad_weights.emplace_back(grad_weight_ih.t().clone());
   grad_weights.emplace_back(grad_weight_hh.t().clone());
-  grad_weights.emplace_back(grad_bias);
-  grad_weights.emplace_back(grad_bias);
+  if (weight.size() == 4) {
+    grad_weights.emplace_back(grad_bias);
+    grad_weights.emplace_back(grad_bias);
+  }
 
   return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{grad_input, grad_hx, grad_cx, grad_weights};
 

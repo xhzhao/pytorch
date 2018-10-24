@@ -3990,7 +3990,7 @@ class TestNN(NNTestCase):
         print("test_MKLDNN_LSTM start")
         #sizes = [(1, 1, 4, 4)]
         IsTrain = [True, False]
-        Biass = [True]
+        Biass = [True, False]
         Sizes = [(1, 1, 4, 4),
                  (1, 3, 4, 4),
                  (2, 3, 4, 4),
