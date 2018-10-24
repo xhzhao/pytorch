@@ -99,7 +99,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
 
   auto weight_ih = weight[0].t().clone();
   auto weight_hh = weight[1].t().clone();
-  auto bias = weight[2] + weight[3];
+  Tensor bias;
+  if (weight.size() == 4) {
+    bias = weight[2] + weight[3];
+  } else if(weight.size() == 2) {
+    // fill zeros for non bias case
+    bias = at::zeros({num_layers, num_directions, num_gates, hidden_size});
+  }
 
 
   auto train = true;

@@ -243,8 +243,10 @@ struct MkldnnRNNWrapper {
       std::vector<Tensor> weight;
       weight.emplace_back(params.w_ih);
       weight.emplace_back(params.w_hh);
-      weight.emplace_back(params.b_ih);
-      weight.emplace_back(params.b_hh);
+      if(params.b_ih.defined() && params.b_hh.defined()) {
+        weight.emplace_back(params.b_ih);
+        weight.emplace_back(params.b_hh);
+      }
       auto input = at::stack(step_inputs);
       auto result = at::mkldnn_rnn(input, weight, hidden, celltype);
       auto output = std::get<0>(result);
@@ -262,8 +264,10 @@ struct MkldnnRNNWrapper <std::tuple<Tensor,Tensor>> {
       std::vector<Tensor> weight;
       weight.emplace_back(params.w_ih);
       weight.emplace_back(params.w_hh);
-      weight.emplace_back(params.b_ih);
-      weight.emplace_back(params.b_hh);
+      if(params.b_ih.defined() && params.b_hh.defined()) {
+        weight.emplace_back(params.b_ih);
+        weight.emplace_back(params.b_hh);
+      }
       auto input = at::stack(step_inputs);
       auto result = at::mkldnn_rnn_lstm(input, weight, hx, cx, celltype);
       auto output = std::get<0>(result);
