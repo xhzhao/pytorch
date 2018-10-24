@@ -1099,7 +1099,7 @@
 - func: mkldnn_rnn_lstm(Tensor input, TensorList weight, Tensor hx, Tensor cx, int64_t celltype) -> (Tensor, Tensor, Tensor, Tensor)
 - func: mkldnn_rnn(Tensor input, TensorList weight, Tensor hx, int64_t celltype) -> (Tensor, Tensor, Tensor)
 
-- func: mkldnn_rnn_lstm_backward(Tensor input, TensorList weight, Tensor hx, Tensor cx, Tensor hy, Tensor cy, Tensor grad_hy, Tensor grad_cy, Tensor workspace, int64_t celltype) -> (Tensor, Tensor, Tensor, TensorList)
+- func: mkldnn_rnn_lstm_backward(Tensor input, TensorList weight, Tensor hx, Tensor cx, Tensor y, Tensor hy, Tensor cy, Tensor grad_y, Tensor grad_hy, Tensor grad_cy, Tensor workspace, int64_t celltype) -> (Tensor, Tensor, Tensor, TensorList)
 - func: mkldnn_rnn_backward(Tensor input, TensorList weight, Tensor hx, Tensor hy, Tensor grad_hy, Tensor workspace, int64_t celltype) -> (Tensor, Tensor, TensorList)
 
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double exponential_average_factor, double epsilon) -> (Tensor, Tensor, Tensor)

@@ -1260,7 +1260,7 @@
   input, hx, cx, weight: mkldnn_rnn_cell_backward(input, weight, hx, cx, result0, result1, grads[0], grads[1], result2)
 
 - name: mkldnn_rnn_lstm(Tensor input, TensorList weight, Tensor hx, Tensor cx, int64_t celltype)
-  input, hx, cx, weight: mkldnn_rnn_lstm_backward(input, weight, hx, cx, result0, result1, grads[0], grads[1], result2, celltype)
+  input, hx, cx, weight: mkldnn_rnn_lstm_backward(input, weight, hx, cx, result0, result1, result2, grads[0], grads[1], grads[2], result3, celltype)
 
 - name: mkldnn_rnn(Tensor input, TensorList weight, Tensor hx, int64_t celltype)
   input, hx, weight: mkldnn_rnn_backward(input, weight, hx, result0, grad, result1, celltype)

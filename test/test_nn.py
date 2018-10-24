@@ -3989,27 +3989,40 @@ class TestNN(NNTestCase):
         # this is a test to check MKLDNN LSTM result
         print("test_MKLDNN_LSTM start")
         #sizes = [(1, 1, 4, 4)]
-        Biass = [True, False]
+        IsTrain = [True, False]
+        Biass = [True]
         Sizes = [(1, 1, 4, 4),
                  (1, 3, 4, 4),
                  (2, 3, 4, 4),
                  (2, 3, 4, 10),
                  (50, 64, 500, 500)]
         for (seq_length,batch_size, input_size, hidden_size) in Sizes:
-            for Bias in Biass:
-              torch._C._set_mkldnn_enabled(False)
-              rnn = nn.LSTM(input_size, hidden_size, bias=Bias).float()
-              input = torch.randn(seq_length, batch_size, input_size, dtype=torch.float)
-              hx = torch.randn(1, batch_size, hidden_size, dtype=torch.float)
-              cx = torch.randn(1, batch_size, hidden_size, dtype=torch.float)
-              output = rnn(input, (hx, cx))
+            for Train in IsTrain:
+              for Bias in Biass:
+                torch._C._set_mkldnn_enabled(False)
+                rnn = nn.LSTM(input_size, hidden_size, bias=Bias).float()
+                input = torch.randn(seq_length, batch_size, input_size, dtype=torch.float)
+                hx = torch.randn(1, batch_size, hidden_size, dtype=torch.float)
+                cx = torch.randn(1, batch_size, hidden_size, dtype=torch.float)
+                output, (hy, cy) = rnn(input, (hx, cx))
 
-              torch._C._set_mkldnn_enabled(True)
-              rnn_mkldnn = deepcopy(rnn)
-              output_mkldnn = rnn_mkldnn(input, (hx, cx))
-              #print("output_mkldnn = ", output_mkldnn)
+                torch._C._set_mkldnn_enabled(True)
+                input_mkldnn = input.clone()
+                hx_mkldnn = hx.clone()
+                cx_mkldnn = cx.clone()
 
-              self.assertEqual(output, output_mkldnn)
+                rnn_mkldnn = deepcopy(rnn)
+                output_mkldnn, (hy_mkldnn, cy_mkldnn) = rnn_mkldnn(input_mkldnn, (hx_mkldnn, cx_mkldnn))
+                self.assertEqual(output, output_mkldnn)
+                self.assertEqual(hy, hy_mkldnn)
+                self.assertEqual(cy, cy_mkldnn)
+                if Train:
+                  output.sum().backward()
+                  output_mkldnn.sum().backward()
+                  self.assertEqual(output.grad, output_mkldnn.grad)
+
+
+
 
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
     @skipIfRocm
