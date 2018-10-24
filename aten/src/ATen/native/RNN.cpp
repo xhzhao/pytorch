@@ -291,18 +291,14 @@ struct FullLayer : Layer<Tensor, hidden_type, CellParams> {
       MkldnnRNNWrapper<hidden_type> mkldnnwrapper;
       auto result = mkldnnwrapper.rnn_forward(step_inputs,input_hidden,params, (int64_t)celltype);
       auto outputs = std::get<0>(result);
-      std::cout<<"outputs.size(0) = "<<outputs.size(0)<<std::endl;
-      std::cout<<"outputs.size(1) = "<<outputs.size(1)<<std::endl;
+      //std::cout<<"outputs.size(0) = "<<outputs.size(0)<<std::endl;
+      //std::cout<<"outputs.size(1) = "<<outputs.size(1)<<std::endl;
       //std::cout<<"outputs.size(2) = "<<outputs.size(2)<<std::endl;
       std::vector<Tensor> step_outputs; 
-      step_outputs = outputs.chunk(outputs.size(0), 0);
-/*
-      if (outputs.size(0) != 1) {
-        step_outputs = outputs.chunk(outputs.size(0), 0);
-      } else {
-        step_outputs.push_back(outputs);
+      for(size_t i = 0; i < outputs.size(0); i++) {
+        step_outputs.push_back(outputs[i]);
       }
-*/
+
       auto hidden = std::get<1>(result);
       return {step_outputs, hidden};
 

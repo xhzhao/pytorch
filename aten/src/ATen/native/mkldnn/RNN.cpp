@@ -74,6 +74,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
   hy = hidden_arr[0];
   cy = hidden_arr[1];
 
+
   auto workspace = at::empty({0}, input.options());
   auto cpu_engine = CpuEngine::Instance().get_engine();
   auto null_memory_ = null_memory(cpu_engine);
@@ -82,14 +83,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
   int32_t batch_size = input.size(1);
   int32_t input_size = input.size(2);
   int32_t hidden_size = hx.size(1);
+  Tensor output = at::empty({time_step, batch_size, hidden_size});
   
-  Tensor output ;
-  if (time_step == 1) {
-    output = at::zeros({batch_size, hidden_size});
-  } else {
-    output = at::empty_like(input);
-  }
-
   std::cout<<"T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
 
   int32_t num_layers = 1;
