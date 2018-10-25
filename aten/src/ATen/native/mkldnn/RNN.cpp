@@ -199,6 +199,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
 
   auto train = true;
 
+  //std::cout<<"mkldnn_rnn_lstm_backward , celltype = "<<celltype<<std::endl;
   AT_CHECK(train, "mkldnn_rnn_cell backward can only be called in training mode");
 
   // TODO: cache hidden_in, hidden_out from forward?
@@ -238,7 +239,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   }
 
   // TODO: check if we need to clone this?
-  auto output = hy.clone();
+  auto output = y;
   auto grad_output = grad_y;
   auto grad_input = at::empty_like(input);
 
@@ -271,7 +272,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
     bias = at::zeros({num_layers, num_directions, num_gates, hidden_size});
   }
 
-  // NB: format ldigo, fioc
+  // NB: format ldigo, ifgo
   auto grad_weight_ih = at::empty_like(weight_ih);
   auto grad_weight_hh = at::empty_like(weight_hh);
   auto grad_bias = at::empty_like(bias);
@@ -357,7 +358,6 @@ try{
 } catch (error &e) {
     std::cerr << "message: " << e.message << std::endl;
 }
-  // TODO: do gate shuffle
   std::vector<Tensor> grad_weights;
   grad_weights.emplace_back(grad_weight_ih.t().clone());
   grad_weights.emplace_back(grad_weight_hh.t().clone());

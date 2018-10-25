@@ -3990,7 +3990,7 @@ class TestNN(NNTestCase):
         print("test_MKLDNN_LSTM start")
         #sizes = [(1, 1, 4, 4)]
         IsTrain = [True, False]
-        Biass = [True, False]
+        Biass = [False]
         Sizes = [(1, 1, 4, 4),
                  (1, 3, 4, 4),
                  (2, 3, 4, 4),
@@ -4001,15 +4001,18 @@ class TestNN(NNTestCase):
               for Bias in Biass:
                 torch._C._set_mkldnn_enabled(False)
                 rnn = nn.LSTM(input_size, hidden_size, bias=Bias).float()
-                input = torch.randn(seq_length, batch_size, input_size, dtype=torch.float)
-                hx = torch.randn(1, batch_size, hidden_size, dtype=torch.float)
-                cx = torch.randn(1, batch_size, hidden_size, dtype=torch.float)
+                input = torch.randn(seq_length, batch_size, input_size, dtype=torch.float, requires_grad=True)
+                hx = torch.randn(1, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
+                cx = torch.randn(1, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
                 output, (hy, cy) = rnn(input, (hx, cx))
 
                 torch._C._set_mkldnn_enabled(True)
-                input_mkldnn = input.clone()
-                hx_mkldnn = hx.clone()
-                cx_mkldnn = cx.clone()
+                input_mkldnn = torch.randn(seq_length, batch_size, input_size, dtype=torch.float, requires_grad=True)
+                hx_mkldnn = torch.randn(1, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
+                cx_mkldnn = torch.randn(1, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
+                input_mkldnn.data.copy_(input.data)
+                hx_mkldnn.data.copy_(hx.data)
+                cx_mkldnn.data.copy_(cx.data)
 
                 rnn_mkldnn = deepcopy(rnn)
                 output_mkldnn, (hy_mkldnn, cy_mkldnn) = rnn_mkldnn(input_mkldnn, (hx_mkldnn, cx_mkldnn))
@@ -4017,9 +4020,19 @@ class TestNN(NNTestCase):
                 self.assertEqual(hy, hy_mkldnn)
                 self.assertEqual(cy, cy_mkldnn)
                 if Train:
-                  output.sum().backward()
-                  output_mkldnn.sum().backward()
-                  self.assertEqual(output.grad, output_mkldnn.grad)
+                  loss = output.sum() #+ hy.sum() + cy.sum()
+                  loss_mkldnn = output_mkldnn.sum() #+ hy_mkldnn.sum() + cy_mkldnn.sum()
+                  loss.backward()
+                  loss_mkldnn.backward()
+                  print("input.grad.sum() = ", input.grad.sum())
+                  print("input_mkldnn.grad.sum() = ", input_mkldnn.grad.sum())
+                  print("hx.grad.sum() = ", hx.grad.sum())
+                  print("hx_mkldnn.grad.sum() = ", hx_mkldnn.grad.sum())
+                  print("cx.grad.sum() = ", cx.grad.sum())
+                  print("cx_mkldnn.grad.sum() = ", cx_mkldnn.grad.sum())
+                  self.assertEqual(input.grad, input_mkldnn.grad)
+                  self.assertEqual(hx.grad, hx_mkldnn.grad)
+                  self.assertEqual(cx.grad, cx_mkldnn.grad)
 
 
 

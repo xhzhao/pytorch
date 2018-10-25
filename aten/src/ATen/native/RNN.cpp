@@ -163,7 +163,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>> {
     }
 
     if (at::userEnabledMKLDNN()) {
-      std::cout<< "enable mkldnn for LSTMCell" << std::endl;
+      //std::cout<< "enable mkldnn for LSTMCell" << std::endl;
       std::vector<Tensor> weight;
       weight.emplace_back(params.w_ih);
       weight.emplace_back(params.w_hh);
@@ -172,7 +172,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>> {
       auto result = at::mkldnn_rnn_cell(input, weight, hx, cx);
       return std::make_tuple(std::get<0>(result), std::get<1>(result));
     } else {
-      std::cout<< "disable mkldnn for LSTMCell" << std::endl;
+      //std::cout<< "disable mkldnn for LSTMCell" << std::endl;
       auto gates = at::linear(input, params.w_ih, params.b_ih) + at::linear(hx, params.w_hh, params.b_hh);
       auto chunked_gates = gates.chunk(4, 1);
 
