@@ -129,7 +129,6 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #if AT_MKLDNN_ENABLED()
   return input.type().backend() == at::Backend::CPU &&
          input.type().scalarType() == kFloat && // only on CPU Float Tensors
-         !is_dilated() && // doesn't support dilation
          !transposed; // or transposed tensors
 #endif
   return false;
@@ -361,7 +360,6 @@ at::Tensor _convolution(
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_mkldnn(input)) {
-#if AT_MKLDNN_ENABLED()
     AT_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
              ") should be the same");
@@ -370,7 +368,6 @@ at::Tensor _convolution(
              ") should be the same");
 
     output = at::mkldnn_convolution(input, weight, bias, params.padding, params.stride, params.dilation, params.groups);
-#endif
   } else {
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
