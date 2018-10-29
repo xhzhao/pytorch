@@ -6,10 +6,9 @@
 
 namespace at { namespace native {
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
-    const Tensor& running_mean, const Tensor& running_var,
-    bool training, double exponential_average_factor, double epsilon){
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(const Tensor& input,
+    const Tensor& weight, const Tensor& bias, const Tensor& running_mean,
+    const Tensor& running_var, bool training, double exponential_average_factor, double epsilon){
   AT_ERROR("mkldnn_batch_norm: ATen not compiled with MKLDNN support");
 }
 
@@ -25,16 +24,22 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
 #else // AT_MKLDNN_EBABLED
 
 #include <ATen/mkldnn/Runtime.h>
+#include <ATen/mkldnn/Memory.h>
+#include <ATen/mkldnn/Utils.h>
 
 using namespace mkldnn;
 
 namespace at { namespace native {
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
-    const Tensor& running_mean, const Tensor& running_var,
-    bool training, double exponential_average_factor, double epsilon)
-{
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(const Tensor& input,
+    const Tensor& weight, const Tensor& bias, const Tensor& running_mean,
+    const Tensor& running_var, bool training, double exponential_average_factor, double epsilon) {
+
+  auto output = at::empty_like(input);
+
+  auto cpu_engine = MKLDNNEngine::Instance().get_engine();
+  auto data_t = memory::data_type::f32;
+
   unsigned flags = 0;
   auto propagation = training ? prop_kind::forward_training : prop_kind::forward_inference;
   bool use_weight_bias_ = (weight.defined() && bias.defined());
@@ -50,10 +55,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     input_tz[i] = input_size[i];
   }
   int32_t ic = input_size[1];
-
-  auto cpu_engine = CpuEngine::Instance().get_engine();
-  memory::data_type data_t = memory::data_type::f32;
-  auto output = at::empty(input_size, input.options());
   auto input_md = memory::desc({input_tz}, data_t, format_input);
 
   auto input_usr_memory = memory({input_md, cpu_engine}, input.data_ptr());
@@ -113,14 +114,12 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
         output_memory, *mean_memory, *variance_memory));
     }
   }
-  std::vector<primitive> net;
-  net.push_back(*bn_forward);
+  MKLDNN_EXEC(*bn_forward);
 
   if (output_usr_memory.get_primitive_desc() != memory::primitive_desc(output_pd)) {
-    net.push_back(reorder(output_memory, output_usr_memory));
+    MKLDNN_EXEC(reorder(output_memory, output_usr_memory));
   }
 
-  Stream::Instance().get_stream().submit(net);
   if (training && use_running_stat) {
     float len = (float)(input_size[0] * input_size[2] * input_size[3]);
     len =(dim == 5) ? (len * input_size[4]) : len;
@@ -136,14 +135,22 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
       running_var_buf[i]  = running_var_buf[i] * reborn + var_buf[i] * adjust;
     }
   }
+
   return std::tuple<Tensor, Tensor, Tensor>{output, save_mean, save_var};
 }
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
-    const Tensor& input, const Tensor& grad_output, const Tensor& weight,
-    const Tensor& bias, const Tensor& running_mean, const Tensor& running_var,
-    const Tensor& save_mean, const Tensor& save_var, double epsilon)
-{
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& input,
+    const Tensor& grad_output, const Tensor& weight, const Tensor& bias,
+    const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean,
+    const Tensor& save_var, double epsilon) {
+
+  auto grad_input = at::empty_like(input);
+  auto grad_weight = at::empty({}, input.options());
+  auto grad_bias = at::empty({}, input.options());
+
+  auto cpu_engine = MKLDNNEngine::Instance().get_engine();
+  auto data_t = memory::data_type::f32;
+
   unsigned flags = 0;
   bool use_weight_bias_ = (weight.defined() && bias.defined());
   bool use_running_stat = (running_mean.defined() && running_var.defined());
@@ -157,13 +164,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
     input_tz[i] = input_size[i];
   }
   int32_t ic = input_size[1];
-
-  auto cpu_engine = CpuEngine::Instance().get_engine();
-  memory::data_type data_t = memory::data_type::f32;
-
-  auto grad_input = at::empty(input.sizes(), input.options());
-  auto grad_weight = at::empty({}, input.options());
-  auto grad_bias = at::empty({}, input.options());
 
   auto input_md = memory::desc({input_tz}, data_t, format_input);
 
@@ -181,7 +181,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
     bn_backward_desc.reset(new batch_normalization_backward::desc(prop_kind::backward_data, input_md, input_md, epsilon, flags));
   }
   auto bn_backward_pd = batch_normalization_backward::primitive_desc(*bn_backward_desc, cpu_engine, bn_forward_pd);
-  std::vector<primitive> net;
   auto grad_output_memory = grad_output_usr_memory;
   auto grad_input_memory = grad_input_usr_memory;
 
@@ -210,8 +209,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
       mkldnn::primitive::at(mean_memory), mkldnn::primitive::at(variance_memory),
       grad_output_memory, grad_input_memory));
   }
-  net.push_back(*bn_backward);
-  Stream::Instance().get_stream().submit(net);
+  MKLDNN_EXEC(*bn_backward);
+
   if (use_weight_bias_) {
     grad_weight.resize_(weight.sizes());
     grad_bias.resize_(weight.sizes());
@@ -221,6 +220,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
      ((float*)grad_bias.data_ptr())[i] = grad_scaleshift_buf[ic + i];
     }
   }
+
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 

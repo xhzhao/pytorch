@@ -6,27 +6,34 @@
 
 namespace at { namespace native {
 
-std::tuple<at::Tensor, at::Tensor> mkldnn_pooling(const Tensor& input, IntList kernel_size,
+std::tuple<Tensor, Tensor> mkldnn_pooling(const Tensor& input, IntList kernel_size,
     IntList stride, IntList padding, bool ceil_mode, bool count_include_pad, bool avg) {
   AT_ERROR("mkldnn_pooling: ATen not compiled with MKLDNN support");
 }
 
-at::Tensor mkldnn_pooling_backward(const Tensor& input, const Tensor& grad_output_t, const Tensor& indice,
-    IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad, bool avg) {
+Tensor mkldnn_pooling_backward(const Tensor& input, const Tensor& grad_output_t,
+    const Tensor& indice, IntList kernel_size, IntList stride, IntList padding,
+    bool ceil_mode, bool count_include_pad, bool avg) {
   AT_ERROR("mkldnn_pooling_backward: ATen not compiled with MKLDNN support");
 }
+
 }} // namespace at::native
 
 #else // AT_MKLDNN_EBABLED
 
 #include <ATen/mkldnn/Runtime.h>
+#include <ATen/mkldnn/Memory.h>
+#include <ATen/mkldnn/Utils.h>
 
 using namespace mkldnn;
 
 namespace at { namespace native {
 
-std::vector<int64_t> pooling_output_size(IntList input_size, IntList kernel_size, IntList stride,
-     IntList padding, bool ceil_mode, bool& force_exclude_padding_flag_) {
+namespace {
+
+std::vector<int64_t> pooling_output_size(IntList input_size, IntList kernel_size,
+    IntList stride, IntList padding, bool ceil_mode, bool& force_exclude_padding_flag_) {
+
   auto dim = input_size.size();
   std::vector<int64_t> output_size(dim);
   output_size[0] = input_size[0];
@@ -67,10 +74,13 @@ std::vector<int64_t> pooling_output_size(IntList input_size, IntList kernel_size
       force_exclude_padding_flag_ = true;
     }
   }
+
   return output_size;
 }
 
-std::vector<int64_t> pooling_pad_size(IntList input_size, IntList output_size, IntList kernel_size, IntList stride, IntList padding) {
+std::vector<int64_t> pooling_pad_size(IntList input_size, IntList output_size,
+    IntList kernel_size, IntList stride, IntList padding) {
+
   auto dim = input_size.size();
   std::vector<int64_t> mkldnn_pad((dim-2)*2);
   mkldnn_pad[0] = padding[0];
@@ -90,13 +100,19 @@ std::vector<int64_t> pooling_pad_size(IntList input_size, IntList output_size, I
     auto d = input_size[4] + mkldnn_pad[4];
     while (d + mkldnn_pad[5] < stride[2] * (output_size[4] - 1) + kernel_size[2]) mkldnn_pad[5]++;
   }
+
   return mkldnn_pad;
 }
 
-std::tuple<at::Tensor, at::Tensor> mkldnn_pooling(const Tensor& input, IntList kernel_size,
+}  // namespace
+
+std::tuple<Tensor, Tensor> mkldnn_pooling(const Tensor& input, IntList kernel_size,
     IntList stride, IntList padding, bool ceil_mode, bool count_include_pad, bool avg) {
-  auto cpu_engine = CpuEngine::Instance().get_engine();
+
+  //TODO: move ouput at the start
+  auto cpu_engine = MKLDNNEngine::Instance().get_engine();
   auto data_t = memory::data_type::f32;
+
   bool force_exclude_padding_flag_ = false;
   IntList input_size = input.sizes();
   auto dim = input_size.size();
@@ -169,7 +185,6 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_pooling(const Tensor& input, IntList k
   auto input_memory = memory({input_md, cpu_engine}, input.data_ptr());
   auto output_usr_memory = memory({output_md, cpu_engine}, output.data_ptr());
 
-  std::vector<primitive> net;
   auto output_pd = pool_fwd_pd.dst_primitive_desc();
   auto output_memory = output_usr_memory;
   if (output_usr_memory.get_primitive_desc() != memory::primitive_desc(output_pd)) {
@@ -183,18 +198,20 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_pooling(const Tensor& input, IntList k
     pool_workspace_memory.reset(new memory(pool_fwd_pd.workspace_primitive_desc(), indice.data_ptr()));
     pool_fwd.reset(new pooling_forward(pool_fwd_pd, input_memory, output_memory, *pool_workspace_memory));
   }
-  net.push_back(*pool_fwd);
+  MKLDNN_EXEC(*pool_fwd);
 
   if (output_memory != output_usr_memory) {
-    net.push_back(reorder(output_memory, output_usr_memory));
+    (reorder(output_memory, output_usr_memory));
   }
-  Stream::Instance().get_stream().submit(net);
+
   return std::make_tuple(output, indice);
 }
 
-at::Tensor mkldnn_pooling_backward(const Tensor& input, const Tensor& grad_output_t, const Tensor& indice,
-    IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad, bool avg) {
-  auto cpu_engine = CpuEngine::Instance().get_engine();
+Tensor mkldnn_pooling_backward(const Tensor& input, const Tensor& grad_output_t,
+    const Tensor& indice, IntList kernel_size, IntList stride, IntList padding,
+    bool ceil_mode, bool count_include_pad, bool avg) {
+
+  auto cpu_engine = MKLDNNEngine::Instance().get_engine();
   auto data_t = memory::data_type::f32;
   IntList input_size = input.sizes();
   auto dim = input_size.size();
@@ -282,7 +299,7 @@ at::Tensor mkldnn_pooling_backward(const Tensor& input, const Tensor& grad_outpu
   auto pool_diff_src_memory = grad_input_usr_memory;
   if (pool_diff_src_memory.get_primitive_desc() != memory::primitive_desc(grad_input_pd))
     pool_diff_src_memory = memory(grad_input_pd);
-  std::vector<primitive> net;
+
   std::shared_ptr<pooling_backward> pool_bwd ;
   std::shared_ptr<memory> pool_workspace_memory;
   if (avg) {
@@ -291,13 +308,14 @@ at::Tensor mkldnn_pooling_backward(const Tensor& input, const Tensor& grad_outpu
     pool_workspace_memory.reset(new memory(pool_fwd_pd.workspace_primitive_desc(), indice.data_ptr()));
     pool_bwd.reset(new pooling_backward(pool_bwd_pd, pool_diff_dst_memory, *pool_workspace_memory, pool_diff_src_memory));
   }
-  net.push_back(*pool_bwd);
+  MKLDNN_EXEC(*pool_bwd);
 
   if (pool_diff_src_memory!= grad_input_usr_memory)
-    net.push_back(reorder(pool_diff_src_memory, grad_input_usr_memory));
-  Stream::Instance().get_stream().submit(net);
+    MKLDNN_EXEC(reorder(pool_diff_src_memory, grad_input_usr_memory));
+
   return grad_input;
 }
 
-}} // namespace at::native
+}}  // namespace at::native
+
 #endif
