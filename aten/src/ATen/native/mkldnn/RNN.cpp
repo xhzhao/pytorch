@@ -63,6 +63,33 @@ namespace {
 
 } // anonymous namespace
 
+
+void print_tensor(memory t, std::string name) {
+#if 0
+  size_t numel = t.get_primitive_desc().get_size();
+  std::cout << "Tensor name = "<< name<<", size = "<<numel<<" , data = ";
+  float * dataptr = (float*)t.get_data_handle();
+  for(size_t i = 0; i < numel; i++) {
+    std::cout << dataptr[i]<<", ";
+  }
+  std::cout<<std::endl;
+#endif
+}
+
+void print_tensor(Tensor t, std::string name) {
+#if 0
+  if(t.defined()){
+    std::cout << "Tensor name = "<< name<<", size = "<<t.numel()<<" , data = ";
+    float* dataptr = (float*)t.data_ptr();
+    for(size_t i = 0; i < t.numel(); i++) {
+      std::cout << dataptr[i]<<", ";
+    }
+    std::cout<<std::endl;
+  }
+#endif
+}
+
+
 std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
     const Tensor& input, TensorList weight, const Tensor& hx,const Tensor& cx,
     int64_t celltype) {
@@ -186,6 +213,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
   return std::make_tuple(output, hy, workspace);
 }
 
+
+
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward(
     const Tensor& input, TensorList weight, const Tensor& hx, const Tensor& cx,
     const Tensor& y, const Tensor& hy, const Tensor& cy, const Tensor& grad_y, const Tensor& grad_hy, const Tensor& grad_cy,
@@ -206,10 +235,6 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   // NB: MKLDNN requires to concat hx and cx for lstm
   Tensor hidden_in, hidden_out, grad_hidden_out, grad_hidden_in, grad_hx, grad_cx;
   if (cx.defined()) {
-    //std::cout<<"hx dims = "<<hx.ndimension()<<std::endl;
-    //std::cout<<"cx dims = "<<cx.ndimension()<<std::endl;
-    //std::cout<<"hy dims = "<<hy.ndimension()<<std::endl;
-    //std::cout<<"cy dims = "<<cy.ndimension()<<std::endl;
     hidden_in = at::cat({hx, cx}, 0);
     hidden_out = at::cat({hy, cy}, 0);
     if(grad_hy.defined() && grad_cy.defined()) {
@@ -272,10 +297,11 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
     bias = at::zeros({num_layers, num_directions, num_gates, hidden_size});
   }
 
+
   // NB: format ldigo, ifgo
-  auto grad_weight_ih = at::empty_like(weight_ih);
-  auto grad_weight_hh = at::empty_like(weight_hh);
-  auto grad_bias = at::empty_like(bias);
+  auto grad_weight_ih = at::zeros_like(weight_ih);
+  auto grad_weight_hh = at::zeros_like(weight_hh);
+  auto grad_bias = at::zeros_like(bias);
 
   auto rnn_prop = prop_kind::backward;
   auto rnn_algo = (cx.defined()) ? algorithm::vanilla_lstm : algorithm::vanilla_gru;
@@ -325,20 +351,23 @@ try{
   auto bias_mem = _reorder(bias_usr_mem, rnn_backward_pd.bias_primitive_desc());
   auto output_mem = _reorder(output_usr_mem, rnn_backward_pd.dst_layer_primitive_desc());
   auto hidden_out_mem = _reorder(hidden_out_usr_mem, rnn_backward_pd.dst_iter_primitive_desc());
-  auto grad_input_mem = _reorder(grad_input_usr_mem, rnn_backward_pd.diff_src_layer_primitive_desc());
-  auto grad_hidden_in_mem = _reorder(grad_hidden_in_usr_mem, rnn_backward_pd.diff_src_iter_primitive_desc());
-  auto grad_weight_ih_mem = _reorder(grad_weight_ih_usr_mem, rnn_backward_pd.diff_weights_layer_primitive_desc());
-  auto grad_weight_hh_mem = _reorder(grad_weight_hh_usr_mem, rnn_backward_pd.diff_weights_iter_primitive_desc());
-  auto grad_bias_mem = _reorder(grad_bias_usr_mem, rnn_backward_pd.diff_bias_primitive_desc());
+  //auto grad_input_mem = _reorder(grad_input_usr_mem, rnn_backward_pd.diff_src_layer_primitive_desc());
+  //auto grad_hidden_in_mem = _reorder(grad_hidden_in_usr_mem, rnn_backward_pd.diff_src_iter_primitive_desc());
+  //auto grad_weight_ih_mem = _reorder(grad_weight_ih_usr_mem, rnn_backward_pd.diff_weights_layer_primitive_desc());
+  //auto grad_weight_hh_mem = _reorder(grad_weight_hh_usr_mem, rnn_backward_pd.diff_weights_iter_primitive_desc());
+  //auto grad_bias_mem = _reorder(grad_bias_usr_mem, rnn_backward_pd.diff_bias_primitive_desc());
   auto grad_output_mem = _reorder(grad_output_usr_mem, rnn_backward_pd.diff_dst_layer_primitive_desc());
   auto grad_hidden_out_mem = _reorder(grad_hidden_out_use_mem, rnn_backward_pd.diff_dst_iter_primitive_desc());
   auto workspace_mem = memory(rnn_backward_pd.workspace_primitive_desc(), workspace.data_ptr());
 
+
   std::vector<primitive> net;
   net.push_back(rnn_backward(rnn_backward_pd, input_mem, hidden_in_mem, weight_ih_mem, weight_hh_mem, bias_mem,
-    output_mem, hidden_out_mem, grad_input_mem, grad_hidden_in_mem, grad_weight_ih_mem, grad_weight_hh_mem,
-    grad_bias_mem, grad_output_mem, grad_hidden_out_mem, workspace_mem));
+    output_mem, hidden_out_mem, grad_input_usr_mem, grad_hidden_in_usr_mem, grad_weight_ih_usr_mem, grad_weight_hh_usr_mem,
+    grad_bias_usr_mem, grad_output_mem, grad_hidden_out_mem, workspace_mem));
 
+
+/*
   if (grad_input_mem != grad_input_usr_mem) {
     net.push_back(reorder(grad_input_mem, grad_input_usr_mem));
   }
@@ -354,6 +383,7 @@ try{
   if (grad_bias_mem != grad_bias_usr_mem) {
     net.push_back(reorder(grad_bias_mem, grad_bias_usr_mem));
   }
+*/
   Stream::Instance().get_stream().submit(net);
 } catch (error &e) {
     std::cerr << "message: " << e.message << std::endl;
@@ -365,6 +395,7 @@ try{
     grad_weights.emplace_back(grad_bias);
     grad_weights.emplace_back(grad_bias);
   }
+
 
   return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{grad_input, grad_hx, grad_cx, grad_weights};
 
