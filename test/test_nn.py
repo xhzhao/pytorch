@@ -4022,7 +4022,13 @@ class TestNN(NNTestCase):
                     self.assertEqual(cy, cy_mkldnn)
                     if Train:
                         loss = (output.sum() + hy.sum() + cy.sum())/10
+                        #loss = output.sum() / 10
+                        #loss = ( hy.sum() + cy.sum())/10
+
                         loss_mkldnn = (output_mkldnn.sum() + hy_mkldnn.sum() + cy_mkldnn.sum())/10
+                        #loss_mkldnn = output_mkldnn.sum()/10
+                        #loss_mkldnn = (hy_mkldnn.sum() + cy_mkldnn.sum())/10
+
                         loss.backward()
                         loss_mkldnn.backward()
                         

@@ -266,6 +266,10 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   // TODO: check if we need to clone this?
   auto output = y;
   auto grad_output = grad_y;
+  if(!grad_y.defined()) {
+    grad_output = at::zeros_like(y);
+  }
+
   auto grad_input = at::empty_like(input);
 
   auto cpu_engine = CpuEngine::Instance().get_engine();
