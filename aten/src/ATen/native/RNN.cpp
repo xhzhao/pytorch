@@ -248,7 +248,8 @@ struct MkldnnRNNWrapper {
         weight.emplace_back(params.b_hh);
       }
       auto input = at::stack(step_inputs);
-      auto result = at::mkldnn_rnn(input, weight, hidden, celltype);
+      auto cx_empty = at::empty({0}, hidden.options());
+      auto result = at::mkldnn_rnn_lstm(input, weight, hidden, cx_empty, celltype);
       auto output = std::get<0>(result);
       auto hy = std::get<1>(result);
       return std::make_tuple(output, hy);
@@ -288,8 +289,9 @@ struct FullLayer : Layer<Tensor, hidden_type, CellParams> {
 
   unstacked_output_type operator()(std::vector<Tensor> step_inputs, const hidden_type& input_hidden, const CellParams& params) const {
 
-    if (at::userEnabledMKLDNN()) {
-      CellType celltype = getCellType();
+    CellType celltype = getCellType();
+    if (at::userEnabledMKLDNN() && celltype == LSTM) {
+
       std::cout<< "enable mkldnn for RNN, type = "<< celltype << std::endl;
 
       MkldnnRNNWrapper<hidden_type> mkldnnwrapper;
