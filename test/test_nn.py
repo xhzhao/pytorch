@@ -3989,11 +3989,12 @@ class TestNN(NNTestCase):
         # this is a test to check MKLDNN LSTM result
         print("test_MKLDNN_LSTM start")
         #CellTypes = ["rnn","lstm","gru"]
-        rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM, 'gru' : nn.GRU}
-        #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM}
+        #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM, 'gru' : nn.GRU}
+        rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM}
         #rnns = {'lstm' : nn.LSTM, 'gru' : nn.GRU}
         #rnns = {'lstm' : nn.LSTM}
-        IsTrain = [True, False]
+        #IsTrain = [True, False]
+        IsTrain = [False]
         Biass = [True, False]
         Sizes = [(1, 1, 1, 1),
                  (1, 1, 4, 4),

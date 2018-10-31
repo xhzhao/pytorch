@@ -93,13 +93,20 @@ void print_tensor(Tensor t, std::string name) {
 std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
     const Tensor& input, TensorList weight, const Tensor& hx,const Tensor& cx,
     int64_t celltype) {
-  std::cout<<"mkldnn_rnn_lstm call start"<< std::endl;
+  std::cout<<"mkldnn_rnn_lstm call start, celltype = "<< celltype<< std::endl;
   Tensor hidden_in, hidden_out, hy, cy;
-  hidden_in = at::cat({hx, cx}, 0);
-  hidden_out = at::empty_like(hidden_in);
-  std::vector<Tensor> hidden_arr = hidden_out.chunk(2, 0);
-  hy = hidden_arr[0];
-  cy = hidden_arr[1];
+  if (celltype == 1) {
+    hidden_in = at::cat({hx, cx}, 0);
+    hidden_out = at::empty_like(hidden_in);
+    std::vector<Tensor> hidden_arr = hidden_out.chunk(2, 0);
+    hy = hidden_arr[0];
+    cy = hidden_arr[1];
+  } else {
+    hidden_in = hx;
+    hidden_out = at::empty_like(hx);
+    hy = hidden_out;
+    cy = at::empty({0}, hx.options()); // NB: Not allowed to return undefined tensors
+  }
 
 
   auto workspace = at::empty({0}, input.options());
@@ -116,13 +123,34 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
 
   int32_t num_layers = 1;
   int32_t num_directions = 1;
-  int32_t num_gates = 4;
-  int32_t num_states = 2;
+
 
   auto format_tnc = memory::format::tnc;
   auto format_ldigo = memory::format::ldigo;
   auto format_ldgo = memory::format::ldgo;
   auto format_ldsnc = memory::format::ldsnc;
+
+  auto train = true;
+
+  auto rnn_prop = train ? prop_kind::forward_training : prop_kind::forward_inference;
+  algorithm rnn_algo;
+  algorithm rnn_activation = algorithm::eltwise_tanh;
+  int32_t num_gates = 4;
+  int32_t num_states = 2;
+  if (celltype == 0 ) {
+    rnn_algo = algorithm::vanilla_rnn;
+    num_gates = 1;
+    num_states = 1;
+  } else if(celltype == 1){
+    rnn_algo = algorithm::vanilla_lstm;
+    num_gates = 4;
+    num_states = 2;
+  } else if(celltype == 2){
+    rnn_algo = algorithm::gru_linear_before_reset;
+    num_gates = 3;
+    num_states = 1;
+  } 
+  auto rnn_dir = rnn_direction::unidirectional_left2right;
 
   auto weight_ih = weight[0].t().clone();
   auto weight_hh = weight[1].t().clone();
@@ -135,13 +163,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
   }
 
 
-  auto train = true;
-
-  auto rnn_prop = train ? prop_kind::forward_training : prop_kind::forward_inference;
-  auto rnn_algo = (cx.defined()) ? algorithm::vanilla_lstm : algorithm::vanilla_gru;
-  auto rnn_dir = rnn_direction::unidirectional_left2right;
-
-
+try {
+  auto rnn_cell_ = rnn_cell::desc(rnn_algo, rnn_activation);
   memory::dims input_tz = {time_step, batch_size, input_size};
   memory::dims weight_ih_tz = {num_layers, num_directions, input_size, num_gates, hidden_size};
   memory::dims weight_hh_tz = {num_layers, num_directions, hidden_size, num_gates, hidden_size};
@@ -156,8 +179,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
   auto bias_md = _generic_md(bias_tz);
   auto output_md = _format_md(output_tz, format_tnc);
 
-  auto rnn_cell_ = rnn_cell::desc(rnn_algo);
-try {
+
+
   auto rnn_forward_desc = rnn_forward::desc(rnn_prop, rnn_cell_, rnn_dir,
     input_md, hidden_md, weight_ih_md, weight_hh_md, bias_md, output_md, hidden_md);
 
@@ -234,7 +257,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   // TODO: cache hidden_in, hidden_out from forward?
   // NB: MKLDNN requires to concat hx and cx for lstm
   Tensor hidden_in, hidden_out, grad_hidden_out, grad_hidden_in, grad_hx, grad_cx;
-  if (cx.defined()) {
+  if (celltype == 1) {
     hidden_in = at::cat({hx, cx}, 0);
     hidden_out = at::cat({hy, cy}, 0);
     if(grad_hy.defined() && grad_cy.defined()) {
@@ -277,8 +300,6 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
 
   int32_t num_layers = 1;
   int32_t num_directions = 1;
-  int32_t num_gates = (cx.defined()) ? 4 : 3;
-  int32_t num_states = (cx.defined()) ? 2 : 1;
 
   int32_t time_step = input.size(0);
   int32_t batch_size = input.size(1);
@@ -292,6 +313,26 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   auto format_ldgo = memory::format::ldgo;
   auto format_ldsnc = memory::format::ldsnc;
 
+  auto rnn_prop = prop_kind::backward;
+  auto rnn_dir = rnn_direction::unidirectional_left2right;
+
+  algorithm rnn_algo;
+  int32_t num_gates = 4;
+  int32_t num_states = 2;
+  if (celltype == 0 ) {
+    rnn_algo = algorithm::vanilla_rnn;
+    num_gates = 1;
+    num_states = 1;
+  } else if(celltype == 1){
+    rnn_algo = algorithm::vanilla_lstm;
+    num_gates = 4;
+    num_states = 2;
+  } else if(celltype == 2){
+    rnn_algo = algorithm::gru_linear_before_reset;
+    num_gates = 3;
+    num_states = 1;
+  } 
+
   auto weight_ih = weight[0].t().clone();
   auto weight_hh = weight[1].t().clone();
   Tensor bias;
@@ -300,16 +341,10 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   } else if(weight.size() == 2) {
     bias = at::zeros({num_layers, num_directions, num_gates, hidden_size});
   }
-
-
   // NB: format ldigo, ifgo
   auto grad_weight_ih = at::zeros_like(weight_ih);
   auto grad_weight_hh = at::zeros_like(weight_hh);
   auto grad_bias = at::zeros_like(bias);
-
-  auto rnn_prop = prop_kind::backward;
-  auto rnn_algo = (cx.defined()) ? algorithm::vanilla_lstm : algorithm::vanilla_gru;
-  auto rnn_dir = rnn_direction::unidirectional_left2right;
 
   memory::dims input_tz = {time_step, batch_size, input_size};
   memory::dims weight_ih_tz = {num_layers, num_directions, input_size, num_gates, hidden_size};
@@ -595,7 +630,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_cell_backward
   auto grad_bias = at::empty_like(bias);
 
   auto rnn_prop = prop_kind::backward;
-  auto rnn_algo = (cx.defined()) ? algorithm::vanilla_lstm : algorithm::vanilla_gru;
+  auto rnn_algo = (cx.defined()) ? algorithm::vanilla_lstm : algorithm::gru_linear_before_reset;
   auto rnn_dir = rnn_direction::unidirectional_left2right;
 
   memory::dims input_tz = {time_step, batch_size, input_size};

@@ -290,7 +290,7 @@ struct FullLayer : Layer<Tensor, hidden_type, CellParams> {
   unstacked_output_type operator()(std::vector<Tensor> step_inputs, const hidden_type& input_hidden, const CellParams& params) const {
 
     CellType celltype = getCellType();
-    if (at::userEnabledMKLDNN() && celltype == LSTM) {
+    if (at::userEnabledMKLDNN()) {
 
       std::cout<< "enable mkldnn for RNN, type = "<< celltype << std::endl;
 
