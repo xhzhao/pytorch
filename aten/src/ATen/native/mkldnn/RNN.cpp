@@ -80,11 +80,14 @@ void print_tensor(Tensor t, std::string name) {
 #if 0
   if(t.defined()){
     std::cout << "Tensor name = "<< name<<", size = "<<t.numel()<<" , data = ";
+
     float* dataptr = (float*)t.data_ptr();
     for(size_t i = 0; i < t.numel(); i++) {
       std::cout << dataptr[i]<<", ";
     }
     std::cout<<std::endl;
+    std::cout << "  sizes = " <<t.sizes()<<std::endl;
+    std::cout << "  strides = " <<t.strides()<<std::endl;
   }
 #endif
 }
@@ -246,6 +249,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   //std::cout << "cy: " << cy.defined() << std::endl;
   //std::cout << "hx: " << hx.defined() << std::endl;
   //std::cout << "cx: " << cx.defined() << std::endl;
+  //std::cout << "grad_y: " << grad_y.defined() << std::endl;
   //std::cout << "grad_hy: " << grad_hy.defined() << std::endl;
   //std::cout << "grad_cy: " << grad_cy.defined() << std::endl;
 
@@ -280,11 +284,16 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   } else {
     hidden_in = hx;
     hidden_out = hy;
-    grad_hidden_out = grad_hy;
+    if(grad_hy.defined()) {
+      grad_hidden_out = grad_hy;
+    } else {
+      grad_hidden_out = at::zeros_like(hy);
+    }
     grad_hidden_in = at::empty_like(grad_hidden_out);
     grad_hx = grad_hidden_in;
     grad_cx = at::empty({0}, hx.options()); // NB: Not allowed to return undefined tensors
   }
+
 
   // TODO: check if we need to clone this?
   auto output = y;
@@ -292,6 +301,10 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   if(!grad_y.defined()) {
     grad_output = at::zeros_like(y);
   }
+  print_tensor(grad_y, "grad_y");
+  print_tensor(grad_hy, "grad_hy");
+  //print_tensor(grad_output, "grad_y");
+  //print_tensor(grad_hidden_out, "grad_hy");
 
   auto grad_input = at::empty_like(input);
 
@@ -317,6 +330,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   auto rnn_dir = rnn_direction::unidirectional_left2right;
 
   algorithm rnn_algo;
+  algorithm rnn_activation = algorithm::eltwise_tanh;
   int32_t num_gates = 4;
   int32_t num_states = 2;
   if (celltype == 0 ) {
@@ -360,7 +374,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   auto bias_md = _generic_md(bias_tz);
   auto output_md = _format_md(output_tz, format_tnc);
 
-  auto rnn_cell_ = rnn_cell::desc(rnn_algo);
+  auto rnn_cell_ = rnn_cell::desc(rnn_algo, rnn_activation);
 try{
   auto rnn_backward_desc = rnn_backward::desc(rnn_prop, rnn_cell_, rnn_dir,
     input_md, hidden_md, weight_ih_md, weight_hh_md, bias_md, output_md, hidden_md,
@@ -383,6 +397,11 @@ try{
   auto grad_output_usr_mem = memory({output_md, cpu_engine}, grad_output.data_ptr());
   auto grad_hidden_out_use_mem = memory({_format_md(hidden_tz, format_ldsnc), cpu_engine}, grad_hidden_out.data_ptr());
 
+
+
+  print_tensor(grad_output_usr_mem, "grad_output_usr_mem");
+  print_tensor(grad_hidden_out_use_mem, "grad_hidden_out_use_mem");
+  
   auto input_mem = _reorder(input_usr_mem, rnn_backward_pd.src_layer_primitive_desc());
   auto hidden_in_mem = _reorder(hidden_in_usr_mem, rnn_backward_pd.src_iter_primitive_desc());
   auto weight_ih_mem = _reorder(weight_ih_usr_mem, rnn_backward_pd.weights_layer_primitive_desc());

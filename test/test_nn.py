@@ -3988,13 +3988,9 @@ class TestNN(NNTestCase):
     def test_MKLDNN_LSTM(self):
         # this is a test to check MKLDNN LSTM result
         print("test_MKLDNN_LSTM start")
-        #CellTypes = ["rnn","lstm","gru"]
         #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM, 'gru' : nn.GRU}
         rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM}
-        #rnns = {'lstm' : nn.LSTM, 'gru' : nn.GRU}
-        #rnns = {'lstm' : nn.LSTM}
-        #IsTrain = [True, False]
-        IsTrain = [False]
+        IsTrain = [True, False]
         Biass = [True, False]
         Sizes = [(1, 1, 1, 1),
                  (1, 1, 4, 4),
@@ -4037,28 +4033,29 @@ class TestNN(NNTestCase):
                             self.assertEqual(cy, cy_mkldnn)
                         if Train:
                             if name is 'lstm':
-                                loss = (output.sum() + hy.sum() + cy.sum())/10
+                                #loss = (output.sum() + hy.sum() + cy.sum())/10
+                                loss = ((output * output).sum() + (hy * hy).sum() + (cy * cy).sum())/10
                             else:
-                                loss = (output.sum() + hy.sum())/10
-                            #loss = output.sum() / 10
-                            #loss = ( hy.sum() + cy.sum())/10
+                                #loss = (output.sum() + hy.sum())/10
+                                loss = ((output * output).sum() + (hy * hy).sum())/10
 
                             if name is 'lstm':
-                                loss_mkldnn = (output_mkldnn.sum() + hy_mkldnn.sum() + cy_mkldnn.sum())/10
+                                #loss_mkldnn = (output_mkldnn.sum() + hy_mkldnn.sum() + cy_mkldnn.sum())/10
+                                loss_mkldnn = ((output_mkldnn * output_mkldnn).sum() + (hy_mkldnn * hy_mkldnn).sum() + (cy_mkldnn * cy_mkldnn).sum())/10
                             else:
-                                loss_mkldnn = (output_mkldnn.sum() + hy_mkldnn.sum())/10
-                            #loss_mkldnn = output_mkldnn.sum()/10
-                            #loss_mkldnn = (hy_mkldnn.sum() + cy_mkldnn.sum())/10
+                                #loss_mkldnn = (output_mkldnn.sum() + hy_mkldnn.sum())/10
+                                loss_mkldnn = ((output_mkldnn * output_mkldnn).sum() + (hy_mkldnn * hy_mkldnn).sum())/10
+                                #print("y_mkldnn = ", output_mkldnn)
+                                #print("hy_mkldnn = ", hy_mkldnn)
+                                #print("hy_mkldnn sum = ", hy_mkldnn.sum())
 
                             loss.backward()
                             loss_mkldnn.backward()
                             
-                            #print("output.grad.sum() = ", output.grad.sum())
-                            #print("output_mkldnn.grad.sum() = ", output_mkldnn.grad.sum())
-                            #print("input.grad.sum() = ", input.grad.sum())
-                            #print("input_mkldnn.grad.sum() = ", input_mkldnn.grad.sum())
-                            #print("hx.grad.sum() = ", hx.grad.sum())
-                            #print("hx_mkldnn.grad.sum() = ", hx_mkldnn.grad.sum())
+                            #print("input.grad.sum() = ", input.grad)
+                            #print("input_mkldnn.grad.sum() = ", input_mkldnn.grad)
+                            #print("hx.grad.sum() = ", hx.grad)
+                            #print("hx_mkldnn.grad.sum() = ", hx_mkldnn.grad)
                             #print("cx.grad.sum() = ", cx.grad.sum())
                             #print("cx_mkldnn.grad.sum() = ", cx_mkldnn.grad.sum())
                             self.assertEqual(input.grad, input_mkldnn.grad)
