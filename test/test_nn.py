@@ -3990,78 +3990,89 @@ class TestNN(NNTestCase):
         print("test_MKLDNN_LSTM start")
         #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM, 'gru' : nn.GRU}
         rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM}
+        #rnns = {'lstm' : nn.LSTM}
         IsTrain = [True, False]
         Biass = [True, False]
+        #Layers = [1, 2, 3]
+        Layers = [1]
+        #Bidirections = [False, True]
+        Bidirections = [False]
         Sizes = [(1, 1, 1, 1),
                  (1, 1, 4, 4),
                  (1, 3, 4, 4),
                  (2, 3, 4, 4),
-                 #(2, 3, 4, 10),
+                 (2, 3, 10, 6),
+                 (2, 3, 10, 20),
                  (2, 3, 10, 20),
                  (50, 64, 500, 500)]
         for name, rnn_t in rnns.items():
-            for (seq_length,batch_size, input_size, hidden_size) in Sizes:
-                for Train in IsTrain:
-                    for Bias in Biass:
-                        torch._C._set_mkldnn_enabled(False)
-                        rnn = rnn_t(input_size, hidden_size, bias=Bias).float()
-                        input = torch.randn(seq_length, batch_size, input_size, dtype=torch.float, requires_grad=True)
-                        hx = torch.randn(1, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
-                        cx = torch.randn(1, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
-                        if name is 'lstm':
-                            output, (hy, cy) = rnn(input, (hx, cx))
-                        else:
-                            output, hy = rnn(input, hx)
+            for layer in Layers:
+                for bidir in Bidirections:
+                    for (seq_length,batch_size, input_size, hidden_size) in Sizes:
+                        for Train in IsTrain:
+                            for Bias in Biass:
+                                print("**************** test case: name = %s, layer = %s, bidir = %s, Train = %s, Bias = %s" % (name,layer,bidir,Train,Bias))
+                                print("                            T = %s, N = %s, I = %s, H = %s" % (seq_length,batch_size, input_size, hidden_size))
+                                layer_mul_dir = layer * 2 if bidir else layer
+                                torch._C._set_mkldnn_enabled(False)
+                                rnn = rnn_t(input_size, hidden_size, bias=Bias, bidirectional=bidir, num_layers=layer).float()
+                                input = torch.randn(seq_length, batch_size, input_size, dtype=torch.float, requires_grad=True)
+                                hx = torch.randn(layer_mul_dir, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
+                                cx = torch.randn(layer_mul_dir, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
+                                if name is 'lstm':
+                                    output, (hy, cy) = rnn(input, (hx, cx))
+                                else:
+                                    output, hy = rnn(input, hx)
 
 
-                        torch._C._set_mkldnn_enabled(True)
-                        input_mkldnn = torch.randn(seq_length, batch_size, input_size, dtype=torch.float, requires_grad=True)
-                        hx_mkldnn = torch.randn(1, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
-                        cx_mkldnn = torch.randn(1, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
-                        input_mkldnn.data.copy_(input.data)
-                        hx_mkldnn.data.copy_(hx.data)
-                        cx_mkldnn.data.copy_(cx.data)
+                                torch._C._set_mkldnn_enabled(True)
+                                input_mkldnn = torch.randn(seq_length, batch_size, input_size, dtype=torch.float, requires_grad=True)
+                                hx_mkldnn = torch.randn(layer_mul_dir, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
+                                cx_mkldnn = torch.randn(layer_mul_dir, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
+                                input_mkldnn.data.copy_(input.data)
+                                hx_mkldnn.data.copy_(hx.data)
+                                cx_mkldnn.data.copy_(cx.data)
 
-                        rnn_mkldnn = deepcopy(rnn)
-                        if name is 'lstm':
-                            output_mkldnn, (hy_mkldnn, cy_mkldnn) = rnn_mkldnn(input_mkldnn, (hx_mkldnn, cx_mkldnn))
-                        else:
-                            output_mkldnn, hy_mkldnn = rnn_mkldnn(input_mkldnn, hx_mkldnn)
-                        self.assertEqual(output, output_mkldnn)
-                        self.assertEqual(hy, hy_mkldnn)
-                        if name is 'lstm':
-                            self.assertEqual(cy, cy_mkldnn)
-                        if Train:
-                            if name is 'lstm':
-                                #loss = (output.sum() + hy.sum() + cy.sum())/10
-                                loss = ((output * output).sum() + (hy * hy).sum() + (cy * cy).sum())/10
-                            else:
-                                #loss = (output.sum() + hy.sum())/10
-                                loss = ((output * output).sum() + (hy * hy).sum())/10
+                                rnn_mkldnn = deepcopy(rnn)
+                                if name is 'lstm':
+                                    output_mkldnn, (hy_mkldnn, cy_mkldnn) = rnn_mkldnn(input_mkldnn, (hx_mkldnn, cx_mkldnn))
+                                else:
+                                    output_mkldnn, hy_mkldnn = rnn_mkldnn(input_mkldnn, hx_mkldnn)
+                                self.assertEqual(output, output_mkldnn)
+                                self.assertEqual(hy, hy_mkldnn)
+                                if name is 'lstm':
+                                    self.assertEqual(cy, cy_mkldnn)
+                                if Train:
+                                    if name is 'lstm':
+                                        #loss = (output.sum() + hy.sum() + cy.sum())/10
+                                        loss = ((output * output).sum() + (hy * hy).sum() + (cy * cy).sum())/10
+                                    else:
+                                        #loss = (output.sum() + hy.sum())/10
+                                        loss = ((output * output).sum() + (hy * hy).sum())/10
 
-                            if name is 'lstm':
-                                #loss_mkldnn = (output_mkldnn.sum() + hy_mkldnn.sum() + cy_mkldnn.sum())/10
-                                loss_mkldnn = ((output_mkldnn * output_mkldnn).sum() + (hy_mkldnn * hy_mkldnn).sum() + (cy_mkldnn * cy_mkldnn).sum())/10
-                            else:
-                                #loss_mkldnn = (output_mkldnn.sum() + hy_mkldnn.sum())/10
-                                loss_mkldnn = ((output_mkldnn * output_mkldnn).sum() + (hy_mkldnn * hy_mkldnn).sum())/10
-                                #print("y_mkldnn = ", output_mkldnn)
-                                #print("hy_mkldnn = ", hy_mkldnn)
-                                #print("hy_mkldnn sum = ", hy_mkldnn.sum())
+                                    if name is 'lstm':
+                                        #loss_mkldnn = (output_mkldnn.sum() + hy_mkldnn.sum() + cy_mkldnn.sum())/10
+                                        loss_mkldnn = ((output_mkldnn * output_mkldnn).sum() + (hy_mkldnn * hy_mkldnn).sum() + (cy_mkldnn * cy_mkldnn).sum())/10
+                                    else:
+                                        #loss_mkldnn = (output_mkldnn.sum() + hy_mkldnn.sum())/10
+                                        loss_mkldnn = ((output_mkldnn * output_mkldnn).sum() + (hy_mkldnn * hy_mkldnn).sum())/10
+                                        #print("y_mkldnn = ", output_mkldnn)
+                                        #print("hy_mkldnn = ", hy_mkldnn)
+                                        #print("hy_mkldnn sum = ", hy_mkldnn.sum())
 
-                            loss.backward()
-                            loss_mkldnn.backward()
-                            
-                            #print("input.grad.sum() = ", input.grad)
-                            #print("input_mkldnn.grad.sum() = ", input_mkldnn.grad)
-                            #print("hx.grad.sum() = ", hx.grad)
-                            #print("hx_mkldnn.grad.sum() = ", hx_mkldnn.grad)
-                            #print("cx.grad.sum() = ", cx.grad.sum())
-                            #print("cx_mkldnn.grad.sum() = ", cx_mkldnn.grad.sum())
-                            self.assertEqual(input.grad, input_mkldnn.grad)
-                            self.assertEqual(hx.grad, hx_mkldnn.grad)
-                            if name is 'lstm':
-                                self.assertEqual(cx.grad, cx_mkldnn.grad)
+                                    loss.backward()
+                                    loss_mkldnn.backward()
+                                    
+                                    #print("input.grad.sum() = ", input.grad)
+                                    #print("input_mkldnn.grad.sum() = ", input_mkldnn.grad)
+                                    #print("hx.grad.sum() = ", hx.grad)
+                                    #print("hx_mkldnn.grad.sum() = ", hx_mkldnn.grad)
+                                    #print("cx.grad.sum() = ", cx.grad.sum())
+                                    #print("cx_mkldnn.grad.sum() = ", cx_mkldnn.grad.sum())
+                                    self.assertEqual(input.grad, input_mkldnn.grad)
+                                    self.assertEqual(hx.grad, hx_mkldnn.grad)
+                                    if name is 'lstm':
+                                        self.assertEqual(cx.grad, cx_mkldnn.grad)
 
 
 
