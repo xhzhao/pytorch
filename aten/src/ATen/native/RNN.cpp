@@ -292,7 +292,7 @@ struct FullLayer : Layer<Tensor, hidden_type, CellParams> {
     CellType celltype = getCellType();
     if (at::userEnabledMKLDNN()) {
 
-      std::cout<< "enable mkldnn for RNN, type = "<< celltype << std::endl;
+      //std::cout<< "enable mkldnn for RNN, type = "<< celltype << std::endl;
 
       MkldnnRNNWrapper<hidden_type> mkldnnwrapper;
       auto result = mkldnnwrapper.rnn_forward(step_inputs,input_hidden,params, (int64_t)celltype);
@@ -309,7 +309,7 @@ struct FullLayer : Layer<Tensor, hidden_type, CellParams> {
       return {step_outputs, hidden};
 
     } else {
-      std::cout<< "disable mkldnn for RNN, type = "<< getCellType() << std::endl;
+      //std::cout<< "disable mkldnn for RNN, type = "<< getCellType() << std::endl;
       std::vector<Tensor> step_outputs;
       auto hidden = input_hidden;
       for (size_t i = 0; i < step_inputs.size(); i++) {
@@ -641,7 +641,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   AT_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  std::cout <<"lstm called in aten 1: batched input" << std::endl;
+  //std::cout <<"lstm called in aten 1: batched input" << std::endl;
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
@@ -663,7 +663,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   AT_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  std::cout <<"lstm called in aten 2: packed input" << std::endl;
+  //std::cout <<"lstm called in aten 2: packed input" << std::endl;
   if (at::cudnn_is_acceptable(data)) {
     Tensor output, hy, cy;
     lstm_packed_cudnn_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,

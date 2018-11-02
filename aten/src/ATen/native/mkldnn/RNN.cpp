@@ -96,7 +96,7 @@ void print_tensor(Tensor t, std::string name) {
 std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
     const Tensor& input, TensorList weight, const Tensor& hx,const Tensor& cx,
     int64_t celltype) {
-  std::cout<<"mkldnn_rnn_lstm call start, celltype = "<< celltype<< std::endl;
+  //std::cout<<"mkldnn_rnn_lstm call start, celltype = "<< celltype<< std::endl;
   Tensor hidden_in, hidden_out, hy, cy;
   if (celltype == 1) {
     hidden_in = at::cat({hx, cx}, 0);
@@ -122,7 +122,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
   int32_t hidden_size = hx.size(1);
   Tensor output = at::empty({time_step, batch_size, hidden_size});
   
-  std::cout<<"T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
+  //std::cout<<"T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
 
   int32_t num_layers = 1;
   int32_t num_directions = 1;
@@ -319,7 +319,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   int32_t input_size = input.size(2);
   int32_t hidden_size = hx.size(1);
   
-  std::cout<<"T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
+  //std::cout<<"T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
 
   auto format_tnc = memory::format::tnc;
   auto format_ldigo = memory::format::ldigo;
