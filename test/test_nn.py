@@ -3988,23 +3988,28 @@ class TestNN(NNTestCase):
     def test_MKLDNN_LSTM(self):
         # this is a test to check MKLDNN LSTM result
         print("test_MKLDNN_LSTM start")
+        #torch.set_printoptions(precision=6)
         #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM, 'gru' : nn.GRU}
         rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM}
+        #rnns = {'gru' : nn.GRU}
         #rnns = {'lstm' : nn.LSTM}
         IsTrain = [True, False]
-        Biass = [True, False]
-        #Layers = [1, 2, 3]
-        Layers = [1]
-        #Bidirections = [False, True]
-        Bidirections = [False]
+        Biass = [False]
+        Layers = [1, 2, 3]
+        #Layers = [1]
+        Bidirections = [False, True]
+        #Bidirections = [False]
         Sizes = [(1, 1, 1, 1),
                  (1, 1, 4, 4),
                  (1, 3, 4, 4),
                  (2, 3, 4, 4),
-                 (2, 3, 10, 6),
-                 (2, 3, 10, 20),
-                 (2, 3, 10, 20),
+                 #(2, 3, 4, 10),
                  (50, 64, 500, 500)]
+
+        def check_grad_weight(model1, model2, p):
+            for p1, p2 in zip(model1.parameters(), model2.parameters()):
+                self.assertEqual(p1.grad, p2.grad, prec=p)
+
         for name, rnn_t in rnns.items():
             for layer in Layers:
                 for bidir in Bidirections:
@@ -4026,6 +4031,7 @@ class TestNN(NNTestCase):
 
 
                                 torch._C._set_mkldnn_enabled(True)
+                                rnn_mkldnn = deepcopy(rnn)
                                 input_mkldnn = torch.randn(seq_length, batch_size, input_size, dtype=torch.float, requires_grad=True)
                                 hx_mkldnn = torch.randn(layer_mul_dir, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
                                 cx_mkldnn = torch.randn(layer_mul_dir, batch_size, hidden_size, dtype=torch.float, requires_grad=True)
@@ -4033,15 +4039,20 @@ class TestNN(NNTestCase):
                                 hx_mkldnn.data.copy_(hx.data)
                                 cx_mkldnn.data.copy_(cx.data)
 
-                                rnn_mkldnn = deepcopy(rnn)
+
                                 if name is 'lstm':
                                     output_mkldnn, (hy_mkldnn, cy_mkldnn) = rnn_mkldnn(input_mkldnn, (hx_mkldnn, cx_mkldnn))
                                 else:
                                     output_mkldnn, hy_mkldnn = rnn_mkldnn(input_mkldnn, hx_mkldnn)
-                                self.assertEqual(output, output_mkldnn)
-                                self.assertEqual(hy, hy_mkldnn)
+                                p = 1e-4 if seq_length > 10 else 1e-5
+                                self.assertEqual(output, output_mkldnn, prec=p)
+                                self.assertEqual(hy, hy_mkldnn, prec=p)
+                                #print("y = ", output)
+                                #print("y_mkldnn = ", output_mkldnn)
+                                #print("hy = ", hy)
+                                #print("hy_mkldnn = ", hy_mkldnn)
                                 if name is 'lstm':
-                                    self.assertEqual(cy, cy_mkldnn)
+                                    self.assertEqual(cy, cy_mkldnn, prec=p)
                                 if Train:
                                     if name is 'lstm':
                                         #loss = (output.sum() + hy.sum() + cy.sum())/10
@@ -4069,10 +4080,11 @@ class TestNN(NNTestCase):
                                     #print("hx_mkldnn.grad.sum() = ", hx_mkldnn.grad)
                                     #print("cx.grad.sum() = ", cx.grad.sum())
                                     #print("cx_mkldnn.grad.sum() = ", cx_mkldnn.grad.sum())
-                                    self.assertEqual(input.grad, input_mkldnn.grad)
-                                    self.assertEqual(hx.grad, hx_mkldnn.grad)
+                                    check_grad_weight(rnn, rnn_mkldnn, p)
+                                    self.assertEqual(input.grad, input_mkldnn.grad, prec=p)
+                                    self.assertEqual(hx.grad, hx_mkldnn.grad, prec=p)
                                     if name is 'lstm':
-                                        self.assertEqual(cx.grad, cx_mkldnn.grad)
+                                        self.assertEqual(cx.grad, cx_mkldnn.grad, prec=p)
 
 
 
