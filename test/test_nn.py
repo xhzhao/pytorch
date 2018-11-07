@@ -3988,11 +3988,11 @@ class TestNN(NNTestCase):
     def test_MKLDNN_LSTM(self):
         # this is a test to check MKLDNN LSTM result
         print("test_MKLDNN_LSTM start")
-        #torch.set_printoptions(precision=6)
+        torch.set_printoptions(precision=6)
         #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM, 'gru' : nn.GRU}
-        rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM}
+        #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM}
         #rnns = {'gru' : nn.GRU}
-        #rnns = {'lstm' : nn.LSTM}
+        rnns = {'lstm' : nn.LSTM}
         IsTrain = [True, False]
         Biass = [False]
         Layers = [1, 2, 3]
@@ -4003,11 +4003,14 @@ class TestNN(NNTestCase):
                  (1, 1, 4, 4),
                  (1, 3, 4, 4),
                  (2, 3, 4, 4),
-                 #(2, 3, 4, 10),
+                 (2, 3, 10, 10),
                  (50, 64, 500, 500)]
 
         def check_grad_weight(model1, model2, p):
+            index = 1
             for p1, p2 in zip(model1.parameters(), model2.parameters()):
+                print("index = ", index)
+                index = index + 1
                 self.assertEqual(p1.grad, p2.grad, prec=p)
 
         for name, rnn_t in rnns.items():
@@ -4028,7 +4031,15 @@ class TestNN(NNTestCase):
                                     output, (hy, cy) = rnn(input, (hx, cx))
                                 else:
                                     output, hy = rnn(input, hx)
+                                if Train:
+                                    if name is 'lstm':
+                                        #loss = (output.sum() + hy.sum() + cy.sum())/10
+                                        loss = ((output * output).sum() + (hy * hy).sum() + (cy * cy).sum())/10
+                                    else:
+                                        #loss = (output.sum() + hy.sum())/10
+                                        loss = ((output * output).sum() + (hy * hy).sum())/10
 
+                                    loss.backward()
 
                                 torch._C._set_mkldnn_enabled(True)
                                 rnn_mkldnn = deepcopy(rnn)
@@ -4055,13 +4066,6 @@ class TestNN(NNTestCase):
                                     self.assertEqual(cy, cy_mkldnn, prec=p)
                                 if Train:
                                     if name is 'lstm':
-                                        #loss = (output.sum() + hy.sum() + cy.sum())/10
-                                        loss = ((output * output).sum() + (hy * hy).sum() + (cy * cy).sum())/10
-                                    else:
-                                        #loss = (output.sum() + hy.sum())/10
-                                        loss = ((output * output).sum() + (hy * hy).sum())/10
-
-                                    if name is 'lstm':
                                         #loss_mkldnn = (output_mkldnn.sum() + hy_mkldnn.sum() + cy_mkldnn.sum())/10
                                         loss_mkldnn = ((output_mkldnn * output_mkldnn).sum() + (hy_mkldnn * hy_mkldnn).sum() + (cy_mkldnn * cy_mkldnn).sum())/10
                                     else:
@@ -4071,7 +4075,7 @@ class TestNN(NNTestCase):
                                         #print("hy_mkldnn = ", hy_mkldnn)
                                         #print("hy_mkldnn sum = ", hy_mkldnn.sum())
 
-                                    loss.backward()
+
                                     loss_mkldnn.backward()
                                     
                                     #print("input.grad.sum() = ", input.grad)
