@@ -210,6 +210,7 @@ Tensor max_pool2d(
                && !is_dilated // not support dilation
                );
 #endif
+
   if (use_mkldnn) {
 #if AT_MKLDNN_ENABLED()
     auto k = self.ndimension();

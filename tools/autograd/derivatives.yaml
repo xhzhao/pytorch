@@ -1253,14 +1253,14 @@
 - name: mkldnn_convolution(Tensor self, Tensor weight, Tensor bias, IntList padding, IntList stride, IntList dilation, int64_t groups)
   self, weight, bias: mkldnn_convolution_backward(self, grad, weight, padding, stride, dilation, groups, grad_input_mask)
 
-- name: mkldnn_relu(Tensor self, double negative_slope)
-  self: mkldnn_relu_backward(self, grad, negative_slope)
+- name: mkldnn_relu(Tensor self)
+  self: mkldnn_relu_backward(self, grad)
 
-- name: mkldnn_relu_(Tensor self, double negative_slope)
-  self: mkldnn_relu_backward(output, grad, negative_slope)
+- name: mkldnn_relu_(Tensor self)
+  self: mkldnn_relu_backward(output, grad)
 
 - name: mkldnn_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double exponential_average_factor, double epsilon)
-  input, weight, bias: mkldnn_batch_norm_backward(input, grad.contiguous(), weight, bias, running_mean, running_var, result1, result2, epsilon)
+  input, weight, bias: mkldnn_batch_norm_backward(input, grad.contiguous(), weight, bias, running_mean, running_var, result1, result2, epsilon, training)
 
 - name: mkldnn_pooling(Tensor input, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad, bool avg)
   input: mkldnn_pooling_backward(input, grad, result1, kernel_size, stride, padding, ceil_mode, count_include_pad, avg)

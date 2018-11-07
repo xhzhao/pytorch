@@ -5,7 +5,6 @@
 #include "ATen/core/Half.h"
 #include <ATen/Config.h>
 
-
 namespace at { namespace native {
 
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
@@ -23,7 +22,7 @@ bool use_mkldnn(const at::Tensor& input) {
 Tensor relu(const Tensor & self) {
   if (use_mkldnn(self)) {
   #if AT_MKLDNN_ENABLED()
-    return at::mkldnn_relu(self, 0.0);
+    return at::mkldnn_relu(self);
   #endif
   }
   return at::threshold(self, 0.0, 0.0);
@@ -32,7 +31,7 @@ Tensor relu(const Tensor & self) {
 Tensor & relu_(Tensor & self) {
   if (use_mkldnn(self)) {
   #if AT_MKLDNN_ENABLED()
-    return at::mkldnn_relu_(self, 0.0);
+    return at::mkldnn_relu_(self);
   #endif
   }
   return at::threshold_(self, 0.0, 0.0);
