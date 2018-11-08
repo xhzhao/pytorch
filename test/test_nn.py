@@ -3990,16 +3990,16 @@ class TestNN(NNTestCase):
         print("test_MKLDNN_LSTM start")
         torch.set_printoptions(precision=6)
         #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM, 'gru' : nn.GRU}
-        rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM}
-        #rnns = {'gru' : nn.GRU}
+        #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM}
+        rnns = {'gru' : nn.GRU}
         #rnns = {'lstm' : nn.LSTM}
         #rnns = {'rnn' : nn.RNN}
-        IsTrain = [True, False]
+        IsTrain = [False]
         Biass = [True, False]
-        #Layers = [1, 2, 3]
-        Layers = [1]
-        #Bidirections = [False, True]
-        Bidirections = [False]
+        Layers = [1, 2, 3]
+        #Layers = [1]
+        Bidirections = [False, True]
+        #Bidirections = [False]
         Sizes = [(1, 1, 1, 1),
                  (1, 1, 4, 4),
                  (1, 3, 4, 4),
@@ -4010,7 +4010,10 @@ class TestNN(NNTestCase):
         def check_grad_weight(model1, model2, p):
             index = 1
             for p1, p2 in zip(model1.parameters(), model2.parameters()):
+                print("index = ", index)
                 index = index + 1
+                print("p1.grad = ", p1.grad)
+                print("p2.grad = ", p2.grad)
                 self.assertEqual(p1.grad, p2.grad, prec=p)
 
         for name, rnn_t in rnns.items():

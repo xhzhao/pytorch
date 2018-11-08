@@ -101,7 +101,7 @@ void print_tensor(memory t, std::string name) {
 }
 
 void print_tensor(Tensor t, std::string name) {
-#if 0
+#if 1
   if(t.defined()){
     std::cout << "Tensor name = "<< name<<", size = "<<t.numel()<<" , data = ";
 
@@ -164,6 +164,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
   algorithm rnn_activation = algorithm::eltwise_tanh;
   int32_t num_gates = 4;
   int32_t num_states = 2;
+  int32_t additional_bias = 0;
   if (celltype == 0 ) {
     rnn_algo = algorithm::vanilla_rnn;
     num_gates = 1;
@@ -176,6 +177,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
     rnn_algo = algorithm::gru_linear_before_reset;
     num_gates = 3;
     num_states = 1;
+    additional_bias = 1;
   } 
   auto rnn_dir = rnn_direction::unidirectional_left2right;
 
@@ -183,10 +185,23 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
   auto weight_hh = weight[1]; //.t().clone();
   Tensor bias;
   if (weight.size() == 4) {
-    bias = weight[2] + weight[3];
+    if (celltype == 2){
+      //bias = at::empty({num_layers, num_directions, num_gates + additional_bias, hidden_size});
+      bias = at::empty({num_gates + additional_bias, hidden_size});
+      auto bias_wx = weight[2].chunk(3, 0);
+      auto bias_wh = weight[3].chunk(3, 0);
+      bias[0] = bias_wx[0] + bias_wh[0];
+      bias[1] = bias_wx[1] + bias_wh[1];
+      bias[2] = bias_wx[2];
+      bias[3] = bias_wh[2];
+
+      //print_tensor(bias, "bias");
+    } else {
+      bias = weight[2] + weight[3];
+    }
   } else if(weight.size() == 2) {
     // fill zeros for non bias case
-    bias = at::zeros({num_layers, num_directions, num_gates, hidden_size});
+    bias = at::zeros({num_layers, num_directions, num_gates + additional_bias, hidden_size});
   }
   auto input_size_wx = weight_ih.size(1);
   auto hidden_size_wx = weight_hh.size(0) / num_gates;
@@ -200,7 +215,7 @@ try {
   memory::dims input_tz = {time_step, batch_size, input_size};
   memory::dims weight_ih_tz = {num_layers, num_directions, input_size, num_gates, hidden_size};
   memory::dims weight_hh_tz = {num_layers, num_directions, hidden_size, num_gates, hidden_size};
-  memory::dims bias_tz = {num_layers, num_directions, num_gates, hidden_size};
+  memory::dims bias_tz = {num_layers, num_directions, num_gates + additional_bias, hidden_size};
   memory::dims hidden_tz = {num_layers, num_directions, num_states, batch_size, hidden_size};
   memory::dims output_tz = {time_step, batch_size, hidden_size};
 
@@ -258,6 +273,19 @@ try {
   }
 
   Stream::Instance().get_stream().submit(net);
+
+  //print_tensor(input, "input");
+  //print_tensor(hx, "hx");
+  //print_tensor(output, "output");
+  //print_tensor(hy, "hy");
+
+  //print_tensor(input_mem,"input_mem");
+  //print_tensor(hidden_in_mem, "hidden_in_mem");
+  //print_tensor(weight_ih_usr_mem, "weight_ih_usr_mem");
+  //print_tensor(weight_ih_mem, "weight_ih_mem");
+  //print_tensor(weight_hh_mem, "weight_hh_mem");
+  //print_tensor(output_mem, "output_mem");
+  //print_tensor(hidden_out_mem, "hidden_out_mem");
 
   } catch (error &e) {
     std::cerr << "message: " << e.message << std::endl;
@@ -369,6 +397,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   algorithm rnn_activation = algorithm::eltwise_tanh;
   int32_t num_gates = 4;
   int32_t num_states = 2;
+  int32_t additional_bias = 0;
   if (celltype == 0 ) {
     rnn_algo = algorithm::vanilla_rnn;
     num_gates = 1;
@@ -381,15 +410,30 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
     rnn_algo = algorithm::gru_linear_before_reset;
     num_gates = 3;
     num_states = 1;
+    additional_bias = 1;
   } 
 
-  auto weight_ih = weight[0];//.t().clone();
-  auto weight_hh = weight[1];//.t().clone();
+  auto weight_ih = weight[0];
+  auto weight_hh = weight[1];
   Tensor bias;
   if (weight.size() == 4) {
-    bias = weight[2] + weight[3];
+#if 0
+    if (celltype == 2) {
+      bias = at::empty({num_layers, num_directions, num_gates + additional_bias, hidden_size});
+      //bias = at::empty({num_gates + additional_bias, hidden_size});
+      //auto bias_wx = weight[2].chunk(3, 0);
+      //auto bias_wh = weight[3].chunk(3, 0);
+      //bias[0] = bias_wx[0] + bias_wh[0];
+      //bias[1] = bias_wx[1] + bias_wh[1];
+      //bias[2] = bias_wx[2];
+      //bias[3] = bias_wh[2];
+    } else 
+#endif
+    {
+      bias = weight[2] + weight[3];
+    }
   } else if(weight.size() == 2) {
-    bias = at::zeros({num_layers, num_directions, num_gates, hidden_size});
+    bias = at::zeros({num_layers, num_directions, num_gates + additional_bias, hidden_size});
   }
   auto grad_weight_ih = at::zeros_like(weight_ih);
   auto grad_weight_hh = at::zeros_like(weight_hh);
@@ -398,7 +442,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   memory::dims input_tz = {time_step, batch_size, input_size};
   memory::dims weight_ih_tz = {num_layers, num_directions, input_size, num_gates, hidden_size};
   memory::dims weight_hh_tz = {num_layers, num_directions, hidden_size, num_gates, hidden_size};
-  memory::dims bias_tz = {num_layers, num_directions, num_gates, hidden_size};
+  memory::dims bias_tz = {num_layers, num_directions, num_gates + additional_bias, hidden_size};
   memory::dims hidden_tz = {num_layers, num_directions, num_states, batch_size, hidden_size};
   memory::dims output_tz = {time_step, batch_size, hidden_size};
 
@@ -461,17 +505,17 @@ try{
   memory_zeros(grad_weight_ih_mem, grad_weight_ih.numel());
   memory_zeros(grad_weight_hh_mem, grad_weight_hh.numel());
 
-  print_tensor(input_mem,"input_mem");
-  print_tensor(hidden_in_mem, "hidden_in_mem");
+  //print_tensor(input_mem,"input_mem");
+  //print_tensor(hidden_in_mem, "hidden_in_mem");
   //print_tensor(weight_ih_usr_mem, "weight_ih_usr_mem");
-  print_tensor(weight_ih_mem, "weight_ih_mem");
-  print_tensor(weight_hh_mem, "weight_hh_mem");
-  print_tensor(output_mem, "output_mem");
-  print_tensor(hidden_out_mem, "hidden_out_mem");
+  //print_tensor(weight_ih_mem, "weight_ih_mem");
+  //print_tensor(weight_hh_mem, "weight_hh_mem");
+  //print_tensor(output_mem, "output_mem");
+  //print_tensor(hidden_out_mem, "hidden_out_mem");
   //print_tensor(grad_input_usr_mem, "grad_input_usr_mem");
   //print_tensor(grad_hidden_in_usr_mem, "grad_hidden_in_usr_mem");
-  print_tensor(grad_output_mem, "grad_output_mem");
-  print_tensor(grad_hidden_out_mem, "grad_hidden_out_mem");
+  //print_tensor(grad_output_mem, "grad_output_mem");
+  //print_tensor(grad_hidden_out_mem, "grad_hidden_out_mem");
 
   std::vector<primitive> net;
   net.push_back(rnn_backward(rnn_backward_pd, input_mem, hidden_in_mem, weight_ih_mem, weight_hh_mem, bias_mem,
@@ -515,8 +559,25 @@ try{
   grad_weights.emplace_back(grad_weight_ih);
   grad_weights.emplace_back(grad_weight_hh);
   if (weight.size() == 4) {
-    grad_weights.emplace_back(grad_bias);
-    grad_weights.emplace_back(grad_bias);
+#if 0
+    if (celltype == 2) {
+      auto bx = at::empty_like(weight[3]);
+      auto bh = at::empty_like(weight[4]);
+      bx[0] = grad_bias[0].clone();
+      bh[0] = grad_bias[0].clone();
+      bx[1] = grad_bias[1].clone();
+      bh[1] = grad_bias[1].clone();
+      bx[2] = grad_bias[2].clone();
+      bh[2] = grad_bias[3].clone();
+      grad_weights.emplace_back(bx);
+      grad_weights.emplace_back(bh);
+    } else {
+      grad_weights.emplace_back(grad_bias);
+      grad_weights.emplace_back(grad_bias);
+    }
+#endif
+      grad_weights.emplace_back(grad_bias);
+      grad_weights.emplace_back(grad_bias);
   }
 
 
