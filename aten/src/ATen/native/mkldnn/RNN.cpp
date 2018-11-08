@@ -59,6 +59,16 @@ namespace {
     }
     return usr_memory;
   }
+  void memory_zeros(memory& t, int numel) {
+    auto memory_pd = t.get_primitive_desc();
+    //size_t numel = memory_pd.get_size();
+    float * dataptr = (float*)t.get_data_handle();
+    for(size_t i = 0; i < numel; i++) {
+      dataptr[i] = 0;
+    }
+    return;
+  }
+
 
   // NB: MKLDNN has several special requirements for RNN weight primitive
   // a) weight needs to be in ldgio format
@@ -136,7 +146,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
   int32_t hidden_size = hx.size(1);
   Tensor output = at::empty({time_step, batch_size, hidden_size});
   
-  std::cout<<"T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
+  //std::cout<<"T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
 
   int32_t num_layers = 1;
   int32_t num_directions = 1;
@@ -349,7 +359,6 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
 
   auto format_tnc = memory::format::tnc;
   auto format_ldgoi = memory::format::ldgoi;
-  auto format_ldigo = memory::format::ldigo;
   auto format_ldgo = memory::format::ldgo;
   auto format_ldsnc = memory::format::ldsnc;
 
@@ -382,8 +391,8 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   } else if(weight.size() == 2) {
     bias = at::zeros({num_layers, num_directions, num_gates, hidden_size});
   }
-  auto grad_weight_ih = at::zeros_like(weight_ih.t());
-  auto grad_weight_hh = at::zeros_like(weight_hh.t());
+  auto grad_weight_ih = at::zeros_like(weight_ih);
+  auto grad_weight_hh = at::zeros_like(weight_hh);
   auto grad_bias = at::zeros_like(bias);
 
   memory::dims input_tz = {time_step, batch_size, input_size};
@@ -417,8 +426,8 @@ try{
   auto hidden_out_usr_mem = memory({_format_md(hidden_tz, format_ldsnc), cpu_engine}, hidden_out.data_ptr());
   auto grad_input_usr_mem = memory({input_md, cpu_engine}, grad_input.data_ptr());
   auto grad_hidden_in_usr_mem = memory({_format_md(hidden_tz, format_ldsnc), cpu_engine}, grad_hidden_in.data_ptr());
-  auto grad_weight_ih_usr_mem = memory({_format_md(weight_ih_tz, format_ldigo), cpu_engine}, grad_weight_ih.data_ptr());
-  auto grad_weight_hh_usr_mem = memory({_format_md(weight_hh_tz, format_ldigo), cpu_engine}, grad_weight_hh.data_ptr());
+  auto grad_weight_ih_usr_mem = memory({_format_md(weight_ih_tz, format_ldgoi), cpu_engine}, grad_weight_ih.data_ptr());
+  auto grad_weight_hh_usr_mem = memory({_format_md(weight_hh_tz, format_ldgoi), cpu_engine}, grad_weight_hh.data_ptr());
   auto grad_bias_usr_mem = memory({_format_md(bias_tz, format_ldgo), cpu_engine}, grad_bias.data_ptr());
   auto grad_output_usr_mem = memory({output_md, cpu_engine}, grad_output.data_ptr());
   auto grad_hidden_out_use_mem = memory({_format_md(hidden_tz, format_ldsnc), cpu_engine}, grad_hidden_out.data_ptr());
@@ -444,6 +453,10 @@ try{
   auto grad_hidden_out_mem = _reorder(grad_hidden_out_use_mem, rnn_backward_pd.diff_dst_iter_primitive_desc());
   auto workspace_mem = memory(rnn_backward_pd.workspace_primitive_desc(), workspace.data_ptr());
 
+
+  memory_zeros(grad_weight_ih_mem, grad_weight_ih.numel());
+  memory_zeros(grad_weight_hh_mem, grad_weight_hh.numel());
+
   print_tensor(input_mem,"input_mem");
   print_tensor(hidden_in_mem, "hidden_in_mem");
   //print_tensor(weight_ih_usr_mem, "weight_ih_usr_mem");
@@ -461,14 +474,12 @@ try{
     output_mem, hidden_out_mem, grad_input_usr_mem, grad_hidden_in_usr_mem, grad_weight_ih_mem, grad_weight_hh_mem,
     grad_bias_usr_mem, grad_output_mem, grad_hidden_out_mem, workspace_mem));
 
-/*
   if (grad_weight_ih_mem != grad_weight_ih_usr_mem) {
     net.push_back(reorder(grad_weight_ih_mem, grad_weight_ih_usr_mem));
   }
   if (grad_weight_hh_mem != grad_weight_hh_usr_mem) {
     net.push_back(reorder(grad_weight_hh_mem, grad_weight_hh_usr_mem));
   }
-*/
 
 
 /*
@@ -497,8 +508,8 @@ try{
     std::cerr << "message: " << e.message << std::endl;
 }
   std::vector<Tensor> grad_weights;
-  grad_weights.emplace_back(grad_weight_ih.t().clone());
-  grad_weights.emplace_back(grad_weight_hh.t().clone());
+  grad_weights.emplace_back(grad_weight_ih);
+  grad_weights.emplace_back(grad_weight_hh);
   if (weight.size() == 4) {
     grad_weights.emplace_back(grad_bias);
     grad_weights.emplace_back(grad_bias);

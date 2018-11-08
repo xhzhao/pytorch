@@ -4009,7 +4009,6 @@ class TestNN(NNTestCase):
         def check_grad_weight(model1, model2, p):
             index = 1
             for p1, p2 in zip(model1.parameters(), model2.parameters()):
-                print("index = ", index)
                 index = index + 1
                 self.assertEqual(p1.grad, p2.grad, prec=p)
 
