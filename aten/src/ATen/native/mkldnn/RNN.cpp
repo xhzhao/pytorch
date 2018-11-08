@@ -146,7 +146,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
   int32_t hidden_size = hx.size(1);
   Tensor output = at::empty({time_step, batch_size, hidden_size});
   
-  //std::cout<<"T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
+  //std::cout<<"forward, T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
 
   int32_t num_layers = 1;
   int32_t num_directions = 1;
@@ -355,7 +355,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   int32_t input_size = input.size(2);
   int32_t hidden_size = hx.size(1);
   
-  //std::cout<<"T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
+  //std::cout<<"backward, T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
 
   auto format_tnc = memory::format::tnc;
   auto format_ldgoi = memory::format::ldgoi;
@@ -411,11 +411,15 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
 
   auto rnn_cell_ = rnn_cell::desc(rnn_algo, rnn_activation);
 try{
+  auto rnn_forward_desc = rnn_forward::desc(rnn_prop, rnn_cell_, rnn_dir,
+    input_md, hidden_md, weight_ih_md, weight_hh_md, bias_md, output_md, hidden_md);
+  auto rnn_forward_pd = rnn_forward::primitive_desc(rnn_forward_desc, cpu_engine);
+
   auto rnn_backward_desc = rnn_backward::desc(rnn_prop, rnn_cell_, rnn_dir,
     input_md, hidden_md, weight_ih_md, weight_hh_md, bias_md, output_md, hidden_md,
     input_md, hidden_md, weight_ih_md, weight_hh_md, bias_md, output_md, hidden_md);
 
-  auto rnn_backward_pd = rnn_backward::primitive_desc(rnn_backward_desc, cpu_engine);
+  auto rnn_backward_pd = rnn_backward::primitive_desc(rnn_backward_desc, cpu_engine, rnn_forward_pd);
 
   auto input_usr_mem = memory({input_md, cpu_engine}, input.data_ptr());
   auto hidden_in_usr_mem = memory({_format_md(hidden_tz, format_ldsnc), cpu_engine}, hidden_in.data_ptr());

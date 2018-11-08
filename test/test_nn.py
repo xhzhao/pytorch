@@ -3990,15 +3990,16 @@ class TestNN(NNTestCase):
         print("test_MKLDNN_LSTM start")
         torch.set_printoptions(precision=6)
         #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM, 'gru' : nn.GRU}
-        #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM}
+        rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM}
         #rnns = {'gru' : nn.GRU}
-        rnns = {'lstm' : nn.LSTM}
+        #rnns = {'lstm' : nn.LSTM}
+        #rnns = {'rnn' : nn.RNN}
         IsTrain = [True, False]
-        Biass = [False]
-        Layers = [1, 2, 3]
-        #Layers = [1]
-        Bidirections = [False, True]
-        #Bidirections = [False]
+        Biass = [True, False]
+        #Layers = [1, 2, 3]
+        Layers = [1]
+        #Bidirections = [False, True]
+        Bidirections = [False]
         Sizes = [(1, 1, 1, 1),
                  (1, 1, 4, 4),
                  (1, 3, 4, 4),
@@ -4054,7 +4055,7 @@ class TestNN(NNTestCase):
                                     output_mkldnn, (hy_mkldnn, cy_mkldnn) = rnn_mkldnn(input_mkldnn, (hx_mkldnn, cx_mkldnn))
                                 else:
                                     output_mkldnn, hy_mkldnn = rnn_mkldnn(input_mkldnn, hx_mkldnn)
-                                p = 1e-4 if seq_length > 10 else 1e-5
+                                p = 2e-4 if seq_length > 10 else 1e-5
                                 self.assertEqual(output, output_mkldnn, prec=p)
                                 self.assertEqual(hy, hy_mkldnn, prec=p)
                                 #print("y = ", output)
