@@ -169,6 +169,8 @@ _(aten, _weight_norm_cuda_interface_backward) \
 _(aten, _weight_norm_differentiable_backward) \
 _(aten, abs) \
 _(aten, acos) \
+_(aten, avg_pool2d) \
+_(aten, avg_pool3d) \
 _(aten, adaptive_avg_pool1d) \
 _(aten, adaptive_avg_pool2d) \
 _(aten, adaptive_avg_pool2d_backward) \
@@ -203,12 +205,12 @@ _(aten, asin) \
 _(aten, atan) \
 _(aten, atan2) \
 _(aten, avg_pool1d) \
-_(aten, avg_pool2d) \
-_(aten, avg_pool2d_backward) \
-_(aten, avg_pool2d_forward) \
-_(aten, avg_pool3d) \
-_(aten, avg_pool3d_backward) \
-_(aten, avg_pool3d_forward) \
+_(aten, thnn_avg_pool2d) \
+_(aten, thnn_avg_pool2d_backward) \
+_(aten, thnn_avg_pool2d_forward) \
+_(aten, thnn_avg_pool3d) \
+_(aten, thnn_avg_pool3d_backward) \
+_(aten, thnn_avg_pool3d_forward) \
 _(aten, baddbmm) \
 _(aten, bartlett_window) \
 _(aten, batch_norm) \
