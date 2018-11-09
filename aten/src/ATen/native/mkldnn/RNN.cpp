@@ -413,28 +413,10 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
     additional_bias = 1;
   } 
 
+
   auto weight_ih = weight[0];
   auto weight_hh = weight[1];
-  Tensor bias;
-  if (weight.size() == 4) {
-#if 0
-    if (celltype == 2) {
-      bias = at::empty({num_layers, num_directions, num_gates + additional_bias, hidden_size});
-      //bias = at::empty({num_gates + additional_bias, hidden_size});
-      //auto bias_wx = weight[2].chunk(3, 0);
-      //auto bias_wh = weight[3].chunk(3, 0);
-      //bias[0] = bias_wx[0] + bias_wh[0];
-      //bias[1] = bias_wx[1] + bias_wh[1];
-      //bias[2] = bias_wx[2];
-      //bias[3] = bias_wh[2];
-    } else 
-#endif
-    {
-      bias = weight[2] + weight[3];
-    }
-  } else if(weight.size() == 2) {
-    bias = at::zeros({num_layers, num_directions, num_gates + additional_bias, hidden_size});
-  }
+  Tensor bias = at::zeros({(num_gates + additional_bias) * hidden_size}, weight[0].options());
   auto grad_weight_ih = at::zeros_like(weight_ih);
   auto grad_weight_hh = at::zeros_like(weight_hh);
   auto grad_bias = at::zeros_like(bias);
@@ -559,25 +541,38 @@ try{
   grad_weights.emplace_back(grad_weight_ih);
   grad_weights.emplace_back(grad_weight_hh);
   if (weight.size() == 4) {
-#if 0
+#if 1
     if (celltype == 2) {
-      auto bx = at::empty_like(weight[3]);
-      auto bh = at::empty_like(weight[4]);
-      bx[0] = grad_bias[0].clone();
-      bh[0] = grad_bias[0].clone();
-      bx[1] = grad_bias[1].clone();
-      bh[1] = grad_bias[1].clone();
-      bx[2] = grad_bias[2].clone();
-      bh[2] = grad_bias[3].clone();
-      grad_weights.emplace_back(bx);
-      grad_weights.emplace_back(bh);
+      //print_tensor(weight[2], "weight[2]");
+      auto grad_bx = at::zeros_like(weight[2]);
+      //auto grad_bx = at::zeros({3 * hidden_size}, grad_bias.options());
+      auto grad_bh = at::zeros({3 * hidden_size}, grad_bias.options());
+      std::vector<Tensor> grad_bx_chunk = grad_bx.chunk(3, 0);
+      std::vector<Tensor> grad_bh_chunk = grad_bh.chunk(3, 0);
+      std::vector<Tensor> chunks = grad_bias.chunk(4, 0);
+      //print_tensor(grad_bx_chunk[0], "grad_bx_chunk[0]");
+      //print_tensor(chunks[0], "chunks[0]");
+      grad_bx_chunk[0].copy_(chunks[0]);
+      grad_bh_chunk[0].copy_(chunks[0]);
+      grad_bx_chunk[1].copy_(chunks[1]);
+      grad_bh_chunk[1].copy_(chunks[1]);
+      grad_bx_chunk[2].copy_(chunks[2]);
+      grad_bh_chunk[2].copy_(chunks[3]);
+
+      grad_weights.emplace_back(grad_bx);
+      grad_weights.emplace_back(grad_bh);
+      //print_tensor(grad_bias, "grad_bias");
+      //print_tensor(grad_bx, "grad_bx");
+      //print_tensor(grad_bh, "grad_bh");
     } else {
       grad_weights.emplace_back(grad_bias);
       grad_weights.emplace_back(grad_bias);
     }
+#else
+
+      grad_weights.emplace_back(grad_bias);
+      grad_weights.emplace_back(grad_bias);
 #endif
-      grad_weights.emplace_back(grad_bias);
-      grad_weights.emplace_back(grad_bias);
   }
 
 
