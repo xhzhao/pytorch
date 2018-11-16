@@ -6,16 +6,17 @@
 
 namespace at { namespace native {
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn_cell(
-    const Tensor& input, TensorList weight, const Tensor& hx, const Tensor& cx) {
-  throw std::runtime_error("_mkldnn_rnn_cell: ATen not compiled with MKLDNN support");
+std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
+    const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx,const Tensor& cx,
+    int64_t celltype) {
+  throw std::runtime_error("mkldnn_rnn: ATen not compiled with MKLDNN support");
 }
 
-std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_cell_backward(
-    const Tensor& input, TensorList weight, const Tensor& hx, const Tensor& cx,
-    const Tensor& hy, const Tensor& cy, const Tensor& grad_hy, const Tensor& grad_cy,
-    const Tensor& workspace) {
-  throw std::runtime_error("_mkldnn_rnn_cell_backward: ATen not compiled with MKLDNN support");
+std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
+    const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx, const Tensor& cx,
+    const Tensor& y, const Tensor& hy, const Tensor& cy, const Tensor& grad_y, const Tensor& grad_hy, const Tensor& grad_cy,
+    const Tensor& workspace, int64_t celltype) {
+  throw std::runtime_error("mkldnn_rnn_backward: ATen not compiled with MKLDNN support");
 }
 
 }} // namespace at::native
@@ -117,8 +118,8 @@ void print_tensor(Tensor t, std::string name) {
 }
 
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_lstm(
-    const Tensor& input, TensorList weight, const Tensor& hx,const Tensor& cx,
+std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
+    const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx,const Tensor& cx,
     int64_t celltype) {
   //std::cout<<"mkldnn_rnn_lstm call start, celltype = "<< celltype<< std::endl;
   Tensor hidden_in, hidden_out, hy, cy;
@@ -305,8 +306,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
 
 
 
-std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward(
-    const Tensor& input, TensorList weight, const Tensor& hx, const Tensor& cx,
+std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
+    const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx, const Tensor& cx,
     const Tensor& y, const Tensor& hy, const Tensor& cy, const Tensor& grad_y, const Tensor& grad_hy, const Tensor& grad_cy,
     const Tensor& workspace, int64_t celltype) {
   //std::cout << "hy: " << hy.defined() << std::endl;
@@ -320,7 +321,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_lstm_backward
   auto train = true;
 
   //std::cout<<"mkldnn_rnn_lstm_backward , celltype = "<<celltype<<std::endl;
-  AT_CHECK(train, "mkldnn_rnn_cell backward can only be called in training mode");
+  AT_CHECK(train, "mkldnn_rnn backward can only be called in training mode");
 
   // TODO: cache hidden_in, hidden_out from forward?
   // NB: MKLDNN requires to concat hx and cx for lstm
@@ -580,21 +581,13 @@ try{
 
 }
 
-std::tuple<Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
-    const Tensor& input, TensorList weight, const Tensor& hx,
-    const Tensor& hy, const Tensor& grad_hy,
-    const Tensor& workspace, int64_t celltype) {
-}
-
-std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn_cell(
-    const Tensor& input, TensorList weight, const Tensor& hx, const Tensor& cx) {
-  // NB: MKLDNN requires to concat hx and cx for lstm
-}
-
-std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_cell_backward(
-    const Tensor& input, TensorList weight, const Tensor& hx, const Tensor& cx,
-    const Tensor& hy, const Tensor& cy, const Tensor& grad_hy, const Tensor& grad_cy,
-    const Tensor& workspace) {
+Tensor mkldnn_rnn_flatten_weight(
+    TensorList weight_arr, int64_t weight_stride0,
+    int64_t input_size,
+    int64_t fn_mode, int64_t fn_hidden_size,
+    int64_t fn_num_layers, bool batch_first,
+    bool fn_bidirectional
+    ) {
 }
 
 }} // namespace at::native

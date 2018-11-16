@@ -162,30 +162,18 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>> {
       return std::make_tuple(std::get<0>(result), std::get<1>(result));
     }
 
-    if (at::userEnabledMKLDNN()) {
-      //std::cout<< "enable mkldnn for LSTMCell" << std::endl;
-      std::vector<Tensor> weight;
-      weight.emplace_back(params.w_ih);
-      weight.emplace_back(params.w_hh);
-      weight.emplace_back(params.b_ih);
-      weight.emplace_back(params.b_hh);
-      auto result = at::mkldnn_rnn_cell(input, weight, hx, cx);
-      return std::make_tuple(std::get<0>(result), std::get<1>(result));
-    } else {
-      //std::cout<< "disable mkldnn for LSTMCell" << std::endl;
-      auto gates = at::linear(input, params.w_ih, params.b_ih) + at::linear(hx, params.w_hh, params.b_hh);
-      auto chunked_gates = gates.chunk(4, 1);
+    auto gates = at::linear(input, params.w_ih, params.b_ih) + at::linear(hx, params.w_hh, params.b_hh);
+    auto chunked_gates = gates.chunk(4, 1);
 
-      auto ingate = chunked_gates[0].sigmoid();
-      auto forgetgate = chunked_gates[1].sigmoid();
-      auto cellgate = chunked_gates[2].tanh();
-      auto outgate = chunked_gates[3].sigmoid();
+    auto ingate = chunked_gates[0].sigmoid();
+    auto forgetgate = chunked_gates[1].sigmoid();
+    auto cellgate = chunked_gates[2].tanh();
+    auto outgate = chunked_gates[3].sigmoid();
 
-      auto cy = (forgetgate * cx) + (ingate * cellgate);
-      auto hy = outgate * cy.tanh();
+    auto cy = (forgetgate * cx) + (ingate * cellgate);
+    auto hy = outgate * cy.tanh();
 
-      return std::make_tuple(hy, cy);
-    }
+    return std::make_tuple(hy, cy);
   }
 };
 
@@ -249,7 +237,8 @@ struct MkldnnRNNWrapper {
       }
       auto input = at::stack(step_inputs);
       auto cx_empty = at::empty({0}, hidden.options());
-      auto result = at::mkldnn_rnn_lstm(input, weight, hidden, cx_empty, celltype);
+      auto bs_empty = at::empty({0}, hidden.options());
+      auto result = at::mkldnn_rnn(input, bs_empty, weight, hidden, cx_empty, celltype);
       auto output = std::get<0>(result);
       auto hy = std::get<1>(result);
       return std::make_tuple(output, hy);
@@ -270,7 +259,8 @@ struct MkldnnRNNWrapper <std::tuple<Tensor,Tensor>> {
         weight.emplace_back(params.b_hh);
       }
       auto input = at::stack(step_inputs);
-      auto result = at::mkldnn_rnn_lstm(input, weight, hx, cx, celltype);
+      auto bs_empty = at::empty({0}, hx.options());
+      auto result = at::mkldnn_rnn(input, bs_empty, weight, hx, cx, celltype);
       auto output = std::get<0>(result);
       auto hy = std::get<1>(result);
       auto cy = std::get<2>(result);

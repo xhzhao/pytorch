@@ -449,12 +449,9 @@ _(aten, mkldnn_convolution) \
 _(aten, mkldnn_convolution_backward) \
 _(aten, mkldnn_convolution_backward_input) \
 _(aten, mkldnn_convolution_backward_weights) \
-_(aten, mkldnn_rnn_cell) \
-_(aten, mkldnn_rnn_cell_backward) \
 _(aten, mkldnn_rnn) \
 _(aten, mkldnn_rnn_backward) \
-_(aten, mkldnn_rnn_lstm) \
-_(aten, mkldnn_rnn_lstm_backward) \
+_(aten, mkldnn_rnn_flatten_weight) \
 _(aten, mm) \
 _(aten, mode) \
 _(aten, mse_loss) \
