@@ -1,9 +1,12 @@
-#include "ATen/ATen.h"
-#include "ATen/CPUApplyUtils.h"
-#include "ATen/Dispatch.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/core/Half.h"
-#include <ATen/Config.h>
+#include <ATen/native/Activation.h>
+
+#include <ATen/ATen.h>
+#include <ATen/CPUApplyUtils.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/TensorIterator.h>
+
+#include "ATen/Config.h"
 
 namespace at { namespace native {
 
@@ -19,13 +22,15 @@ bool use_mkldnn(const at::Tensor& input) {
   return false;
 }
 
+DEFINE_DISPATCH(threshold_stub);
+
 Tensor relu(const Tensor & self) {
   if (use_mkldnn(self)) {
   #if AT_MKLDNN_ENABLED()
     return at::mkldnn_relu(self);
   #endif
   }
-  return at::threshold(self, 0.0, 0.0);
+  return at::threshold(self, 0, 0);
 }
 
 Tensor & relu_(Tensor & self) {
@@ -34,7 +39,7 @@ Tensor & relu_(Tensor & self) {
     return at::mkldnn_relu_(self);
   #endif
   }
-  return at::threshold_(self, 0.0, 0.0);
+  return at::threshold_(self, 0, 0);
 }
 
 Tensor selu(const Tensor & self) {
@@ -61,6 +66,38 @@ Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Gen
 
 Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
   return at::rrelu_with_noise_(self, at::empty({0}, self.options()), lower, upper, training, generator);
+}
+
+// computes `result = self <= threshold ? value : other`
+// other is `self` in threshold() and `grad` in threshold_backward()
+static Tensor threshold_out(
+    optional<Tensor> opt_result,
+    const Tensor& self,
+    Scalar threshold,
+    Scalar value,
+    const Tensor& other) {
+  Tensor result = opt_result.value_or(Tensor());
+  auto iter = TensorIterator::binary_op(result, self, other);
+  threshold_stub(iter->device_type(), *iter, threshold, value);
+  return iter->output();
+}
+
+Tensor threshold(const Tensor& self, Scalar threshold, Scalar value) {
+  return threshold_out(nullopt, self, threshold, value, self);
+}
+
+Tensor& threshold_(Tensor& self, Scalar threshold, Scalar value) {
+  threshold_out(make_optional(self), self, threshold, value, self);
+  return self;
+}
+
+Tensor& threshold_out(Tensor& result, const Tensor& self, Scalar threshold, Scalar value) {
+  threshold_out(make_optional(result), self, threshold, value, self);
+  return result;
+}
+
+Tensor threshold_backward(const Tensor& grad, const Tensor& self, Scalar threshold) {
+  return threshold_out(nullopt, self, threshold, 0, grad);
 }
 
 // -----------------------------------

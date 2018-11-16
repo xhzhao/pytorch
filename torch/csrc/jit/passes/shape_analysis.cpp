@@ -38,6 +38,12 @@ int64_t wrapDim(int64_t dim, at::IntList sizes) {
   return dim;
 }
 
+// TODO: Would be better to make JIT not assume that CUDA devices
+// are the only thing that exist.
+static at::Device jitDeviceIndexToDevice(int device) {
+  return device == -1 ? at::kCPU : at::Device(at::kCUDA, device);
+}
+
 IValue representativeValue(Value* v) {
   TypePtr type_ = v->type();
   // if the value is actually constant, just use it!
@@ -46,9 +52,9 @@ IValue representativeValue(Value* v) {
   }
   if (CompleteTensorTypePtr type = type_->cast<CompleteTensorType>()) {
     auto backend = type->device() == -1 ? at::Backend::CPU : at::Backend::CUDA;
-    at::DeviceGuard device_guard(type->device());
+    at::DeviceGuard device_guard(jitDeviceIndexToDevice(type->device()));
     auto& attype = at::getNonVariableType(backend, type->scalarType());
-    auto t = attype.tensor(type->sizes(), type->strides()).zero_();
+    auto t = at::empty_strided(type->sizes(), type->strides(), attype.options()).zero_();
     return autograd::make_variable(t, /*requires_grad=*/false);
   } else if (type_->isSubtypeOf(FloatType::get())) {
     return 0.f;
@@ -64,26 +70,26 @@ IValue representativeValue(Value* v) {
 void PropagateShapeOnBlock(Block * block, bool insert_expands=true);
 
 // for each node in the schema with type Tensor, extract the T type
-// returns at::nullopt if any Tensor in the schema does not have a known shape
+// returns c10::nullopt if any Tensor in the schema does not have a known shape
 // ignores non-tensor in the list of inputs
-template<typename T>
-at::optional<std::vector<std::shared_ptr<T>>> gatherTensorTypes(Node *node) {
+template <typename T>
+c10::optional<std::vector<std::shared_ptr<T>>> gatherTensorTypes(Node* node) {
   std::vector<std::shared_ptr<T>> tensor_types;
 
   auto & schema = node->schema();
-  auto & args = schema.arguments;
+  auto & args = schema.arguments();
   // can't handle varargs primitives because we don't know what should be a Tensor
-  if (schema.is_vararg) {
-    return at::nullopt;
+  if (schema.is_vararg()) {
+    return c10::nullopt;
   }
   for (size_t i = 0; i < args.size(); ++i) {
-    if (args[i].type->isSubtypeOf(ListType::ofTensors())) {
-      return at::nullopt;
-    } else if (args[i].type->isSubtypeOf(DynamicType::get())) {
+    if (args[i].type()->isSubtypeOf(ListType::ofTensors())) {
+      return c10::nullopt;
+    } else if (args[i].type()->isSubtypeOf(DynamicType::get())) {
       if (auto type = node->input(i)->type()->cast<T>()) {
         tensor_types.push_back(type);
       } else {
-        return at::nullopt;
+        return c10::nullopt;
       }
     } else /* non-tensor type */ {
       continue;
@@ -348,6 +354,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     }
     case prim::PythonOp:
     case prim::Print:
+    case prim::RaiseException:
     case prim::Undefined: {
       setUnshapedType(node);
       return;
@@ -375,7 +382,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
   return setUnshapedType(node);
 }
 
-static at::optional<size_t> determineListSize(Value * list) {
+static c10::optional<size_t> determineListSize(Value* list) {
   JIT_ASSERT(list->type()->cast<ListType>());
   if (auto shape = constant_as<std::vector<int64_t>>(list)) {
     return shape->size();
@@ -384,7 +391,7 @@ static at::optional<size_t> determineListSize(Value * list) {
   if (input_node->kind() == prim::ListConstruct) {
     return input_node->inputs().size();
   }
-  return at::nullopt;
+  return c10::nullopt;
 }
 
 bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
@@ -429,7 +436,6 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::t(Tensor self) -> Tensor",
     "aten::sigmoid(Tensor self) -> Tensor",
     "aten::tanh(Tensor self) -> Tensor",
-    "aten::exp(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
     "aten::asin(Tensor self) -> Tensor",
     "aten::atan(Tensor self) -> Tensor",
@@ -438,7 +444,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::contiguous(Tensor self) -> Tensor",
     "aten::bernoulli(Tensor self, *, Generator generator) -> Tensor",
     "aten::celu(Tensor self, Scalar alpha) -> Tensor",
-    "aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor",
+    "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
     "aten::clamp_max(Tensor self, Scalar max) -> Tensor",
     "aten::clamp_min(Tensor self, Scalar min) -> Tensor",
     "aten::alpha_dropout(Tensor input, float p, bool train) -> Tensor",
@@ -531,8 +537,6 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::mul(Tensor self, Tensor other) -> Tensor",
     "aten::div(Tensor self, Tensor other) -> Tensor",
     "aten::pow(Tensor self, Tensor exponent) -> Tensor",
-    "aten::min(Tensor self, Tensor other) -> Tensor",
-    "aten::max(Tensor self, Tensor other) -> Tensor",
     "aten::fmod(Tensor self, Tensor other) -> Tensor",
     "aten::remainder(Tensor self, Tensor other) -> Tensor",
     "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
@@ -557,7 +561,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::pow(Tensor self, Scalar exponent) -> Tensor",
     "aten::fmod(Tensor self, Scalar other) -> Tensor",
     "aten::remainder(Tensor self, Scalar other) -> Tensor",
-    "aten::pow(Scalar base, Tensor self) -> Tensor",
+    "aten::pow(Scalar self, Tensor exponent) -> Tensor",
     "aten::__and__(Tensor self, Scalar other) -> Tensor",
     "aten::__or__(Tensor self, Scalar other) -> Tensor",
     "aten::__xor__(Tensor self, Scalar other) -> Tensor",
@@ -645,15 +649,15 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
   //     Knowing the type and device of weights or biases is usually enough to
   //     infer the output type.
   static const register_formula_for nn_ops_first_input_preserving {{
-    "aten::batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
-    "aten::conv1d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
-    "aten::conv2d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
-    "aten::conv3d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
+    "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
+    "aten::conv1d(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
+    "aten::conv2d(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
+    "aten::conv3d(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
     "aten::conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad) -> Tensor",
-    "aten::conv_transpose1d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
-    "aten::conv_transpose2d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
-    "aten::conv_transpose3d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
-    "aten::convolution(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor",
+    "aten::conv_transpose1d(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
+    "aten::conv_transpose2d(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
+    "aten::conv_transpose3d(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
+    "aten::convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor",
     "aten::adaptive_avg_pool1d(Tensor self, int[] output_size) -> Tensor",
     "aten::adaptive_avg_pool2d(Tensor self, int[] output_size) -> Tensor",
     "aten::adaptive_avg_pool3d(Tensor self, int[] output_size) -> Tensor",
@@ -821,12 +825,14 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     return {};
   }};
 
-  static const auto get_device_int = [](at::optional<at::Device> dev) -> at::optional<int> {
-    if (!dev) return {};
+  static const auto get_device_int =
+      [](c10::optional<at::Device> dev) -> c10::optional<int> {
+    if (!dev)
+      return {};
     if (dev->is_cpu()) {
       return {-1};
     }
-    return dev->has_index() ? at::optional<int>{dev->index()} : at::nullopt;
+    return dev->has_index() ? c10::optional<int>{dev->index()} : c10::nullopt;
   };
   static const auto factory_with_ndim = [](Node * node, int dim) -> type_vec_t{
     auto maybe_layout = node->get<at::Layout>(attr::layout);
@@ -1010,7 +1016,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
       node->output()->setType(weight_type->withDim(indices_type->dim() + 1));
       return true;
     }
-  } else if (node->matches("aten::bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor bias) -> Tensor")) {
+  } else if (node->matches("aten::bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor")) {
     if (auto type = input_type(0)) {
       node->output()->setType(type);
       return true;
@@ -1177,7 +1183,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     node->output()->setType(tp->withSizesStrides(sizes, strides));
     return true;
   } else if (node->matches("aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
-                           /*with_const=*/{attr::dim, attr::length})) {
+                           /*const_inputs=*/{attr::dim, attr::length})) {
     auto tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     int64_t dim = node->get<int64_t>(attr::dim).value();
@@ -1190,7 +1196,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     node->output()->setType(tensor_types.at(0)->withSizes({}));
     return true;
   } else if (node->matches("aten::sum(Tensor self, int[] dim, bool keepdim) -> Tensor",
-             /*with_const=*/{attr::dim, attr::keepdim})) {
+             /*const_inputs=*/{attr::dim, attr::keepdim})) {
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     auto dims = node->get<std::vector<int64_t>>(attr::dim).value();
@@ -1206,7 +1212,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     }
     node->output()->setType(tp->withSizes(sizes));
     return true;
-  } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*with_const=*/attr::dim)) {
+  } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*const_inputs=*/attr::dim)) {
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     auto strides = tp->strides();
@@ -1218,7 +1224,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     }
     node->output()->setType(tp->withSizesStrides(sizes, strides));
     return true;
-  } else if (node->matches("aten::unsqueeze(Tensor self, int dim) -> Tensor", /*with_const=*/attr::dim)) {
+  } else if (node->matches("aten::unsqueeze(Tensor self, int dim) -> Tensor", /*const_inputs=*/attr::dim)) {
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     auto strides = tp->strides();
@@ -1229,7 +1235,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     strides.insert(strides.begin() + dim, new_stride);
     node->output()->setType(tp->withSizesStrides(sizes, strides));
     return true;
-  } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor", /*with_const=*/attr::size)) {
+  } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor", /*const_inputs=*/attr::size)) {
     auto sizes = node->get<std::vector<int64_t>>(attr::size).value();
     bool inferred = false;
     size_t inferred_idx;
@@ -1263,7 +1269,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     }
     return true;
   } else if (node->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
-             /*with_const=*/attr::size)) {
+             /*const_inputs=*/attr::size)) {
     auto tp = tensor_types.at(0);
     std::vector<int64_t> sizes, strides;
     std::tie(sizes, strides) = at::inferExpandGeometry(
@@ -1271,7 +1277,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     node->output()->setType(tp->withSizesStrides(sizes, strides));
     return true;
   } else if (node->matches("aten::index_select(Tensor self, int dim, Tensor index) -> Tensor",
-             /*with_const=*/attr::dim)) {
+             /*const_inputs=*/attr::dim)) {
     auto ten = tensor_types.at(0);
     auto index = tensor_types.at(1);
     int64_t dim = node->get<int64_t>(attr::dim).value();
@@ -1282,7 +1288,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     node->output()->setType(ten->withSizes(sizes));
     return true;
   } else if (node->matches("aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]",
-                           /*with_const=*/{attr::chunks, attr::dim})) {
+                           /*const_inputs=*/{attr::chunks, attr::dim})) {
     auto input_type = tensor_types.at(0);
     auto sizes = input_type->sizes();
     const auto & strides = input_type->strides();
