@@ -17,6 +17,7 @@ std::string runJITCPPTests() {
   testCustomOperators();
   testDifferentiate(out);
   testDifferentiateWithRequiresGrad(out);
+  testDynamicDAG();
   testFromQualString();
   testFusion();
   testGraphExecutor();
@@ -24,7 +25,11 @@ std::string runJITCPPTests() {
   testInterp();
   testIValue();
   testProto();
+  testSchemaParser();
+  testTopologicalIndex();
+  testTopologicalMove();
   return out.str();
 }
+
 } // namespace jit
 } // namespace torch
