@@ -124,8 +124,8 @@ void print_tensor(Tensor t, std::string name) {
 
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
-    const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx,const Tensor& cx,
-    int64_t celltype) {
+    const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx, const Tensor& cx,
+    int64_t celltype, bool has_biases, int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   //std::cout<<"mkldnn_rnn_lstm call start, celltype = "<< celltype<< std::endl;
   Tensor hidden_in, hidden_out, hy, cy;
   if (celltype == MKLDNN_LSTM) {
@@ -155,7 +155,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
   //print_tensor(hx, "hx "); 
   //std::cout<<"forward, T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
 
-  int32_t num_layers = 1;
+  //int32_t num_layers = 1;
   int32_t num_directions = 1;
 
 
@@ -164,7 +164,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
   auto format_ldgo = memory::format::ldgo;
   auto format_ldsnc = memory::format::ldsnc;
 
-  auto train = true;
+  //auto train = true;
 
   auto rnn_prop = train ? prop_kind::forward_training : prop_kind::forward_inference;
   algorithm rnn_algo;
@@ -311,7 +311,8 @@ try {
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
     const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx, const Tensor& cx,
     const Tensor& y, const Tensor& hy, const Tensor& cy, const Tensor& grad_y, const Tensor& grad_hy, const Tensor& grad_cy,
-    const Tensor& workspace, int64_t celltype) {
+    const Tensor& workspace, int64_t celltype, bool has_biases, int64_t num_layers, double dropout_p, bool train,
+    bool bidirectional, bool batch_first) {
   //std::cout << "hy: " << hy.defined() << std::endl;
   //std::cout << "cy: " << cy.defined() << std::endl;
   //std::cout << "hx: " << hx.defined() << std::endl;
@@ -320,7 +321,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
   //std::cout << "grad_hy: " << grad_hy.defined() << std::endl;
   //std::cout << "grad_cy: " << grad_cy.defined() << std::endl;
 
-  auto train = true;
+  //auto train = true;
 
   //std::cout<<"mkldnn_rnn_lstm_backward , celltype = "<<celltype<<std::endl;
   AT_CHECK(train, "mkldnn_rnn backward can only be called in training mode");
@@ -378,7 +379,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
   auto cpu_engine = CpuEngine::Instance().get_engine();
   auto null_memory_ = null_memory(cpu_engine);
 
-  int32_t num_layers = 1;
+  //int32_t num_layers = 1;
   int32_t num_directions = 1;
 
   int32_t time_step = input.size(0);

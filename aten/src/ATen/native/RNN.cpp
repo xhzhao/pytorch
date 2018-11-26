@@ -512,12 +512,13 @@ void NAME##_mkldnn_stub(Tensor& output, Tensor& hy,                             
       const Tensor& input, const Tensor& hx,                                   \
       TensorList params, bool has_biases,                                      \
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) { \
-    int64_t celltype = CELLTYPE;                                              \
-    auto bs_empty = at::empty({0}, hx.options());                              \
-    auto cx_empty = at::empty({0}, hx.options());                              \
-    auto result = at::mkldnn_rnn(input, bs_empty, params, hx,  cx_empty, (int64_t)celltype);\
-    output = std::get<0>(result);                                              \
-    hy = std::get<1>(result);                                                  \
+  int64_t celltype = CELLTYPE;                                              \
+  auto bs_empty = at::empty({0}, hx.options());                              \
+  auto cx_empty = at::empty({0}, hx.options());                              \
+  auto result = at::mkldnn_rnn(input, bs_empty, params, hx,  cx_empty, (int64_t)celltype,\
+    has_biases, num_layers, dropout_p, train, bidirectional, batch_first);\
+  output = std::get<0>(result);                                              \
+  hy = std::get<1>(result);                                                  \
 }                                                                              \
                                                                                \
 void NAME##_packed_mkldnn_stub(Tensor& output, Tensor& hy,                           \
@@ -535,13 +536,13 @@ void lstm_mkldnn_stub(Tensor& output, Tensor& hy, Tensor& cy,
       const Tensor& input, TensorList hx,
       TensorList params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-
-    int64_t celltype = MKLDNN_LSTM;
-    auto bs_empty = at::empty({0}, hx[0].options());
-    auto result = at::mkldnn_rnn(input, bs_empty, params, hx[0], hx[1], (int64_t)celltype);
-    output = std::get<0>(result);
-    hy = std::get<1>(result);
-    cy = std::get<2>(result);
+  int64_t celltype = MKLDNN_LSTM;
+  auto bs_empty = at::empty({0}, hx[0].options());
+  auto result = at::mkldnn_rnn(input, bs_empty, params, hx[0], hx[1], (int64_t)celltype,
+    has_biases, num_layers, dropout_p, train, bidirectional, batch_first);
+  output = std::get<0>(result);
+  hy = std::get<1>(result);
+  cy = std::get<2>(result);
 }
 
 
@@ -634,17 +635,6 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     return std::make_tuple(output, hy, cy);
   }
 
-/*
-  if (at::userEnabledMKLDNN()) {
-    int64_t celltype = 1;
-    auto bs_empty = at::empty({0}, hx[0].options());
-    auto result = at::mkldnn_rnn(_input, bs_empty, _params, hx[0], hx[1], (int64_t)celltype);
-    auto outputs = std::get<0>(result);
-    auto hy = std::get<1>(result);
-    auto cy = std::get<2>(result);
-    return std::make_tuple(outputs, hy, cy);
-  }
-*/
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   auto params = gather_params(_params, has_biases);
   auto results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
