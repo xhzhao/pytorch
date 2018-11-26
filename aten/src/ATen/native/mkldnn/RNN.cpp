@@ -25,6 +25,11 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
 
 #include <ATen/mkldnn/Runtime.h>
 
+#define MKLDNN_RNN_TANH  0
+#define MKLDNN_RNN_RELU  1
+#define MKLDNN_GRU       2
+#define MKLDNN_LSTM      3
+
 using namespace mkldnn;
 
 namespace at { namespace native {
@@ -123,7 +128,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
     int64_t celltype) {
   //std::cout<<"mkldnn_rnn_lstm call start, celltype = "<< celltype<< std::endl;
   Tensor hidden_in, hidden_out, hy, cy;
-  if (celltype == 1) {
+  if (celltype == MKLDNN_LSTM) {
     hidden_in = at::cat({hx, cx}, 0);
     hidden_out = at::empty_like(hidden_in);
     std::vector<Tensor> hidden_arr = hidden_out.chunk(2, 0);
@@ -144,9 +149,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
   int32_t time_step = input.size(0);
   int32_t batch_size = input.size(1);
   int32_t input_size = input.size(2);
-  int32_t hidden_size = hx.size(1);
+  int32_t hidden_size = hx.size(2);
   Tensor output = at::empty({time_step, batch_size, hidden_size});
-  
+  //print_tensor(input, "input "); 
+  //print_tensor(hx, "hx "); 
   //std::cout<<"forward, T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
 
   int32_t num_layers = 1;
@@ -166,15 +172,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
   int32_t num_gates = 4;
   int32_t num_states = 2;
   int32_t additional_bias = 0;
-  if (celltype == 0 ) {
+  if (celltype == MKLDNN_RNN_TANH ) {
     rnn_algo = algorithm::vanilla_rnn;
     num_gates = 1;
     num_states = 1;
-  } else if(celltype == 1){
+  } else if(celltype == MKLDNN_LSTM){
     rnn_algo = algorithm::vanilla_lstm;
     num_gates = 4;
     num_states = 2;
-  } else if(celltype == 2){
+  } else if(celltype == MKLDNN_GRU){
     rnn_algo = algorithm::gru_linear_before_reset;
     num_gates = 3;
     num_states = 1;
@@ -186,7 +192,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
   auto weight_hh = weight[1]; //.t().clone();
   Tensor bias;
   if (weight.size() == 4) {
-    if (celltype == 2){
+    if (celltype == MKLDNN_GRU){
       //bias = at::empty({num_layers, num_directions, num_gates + additional_bias, hidden_size});
       bias = at::empty({num_gates + additional_bias, hidden_size});
       auto bias_wx = weight[2].chunk(3, 0);
@@ -204,12 +210,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
     // fill zeros for non bias case
     bias = at::zeros({num_layers, num_directions, num_gates + additional_bias, hidden_size});
   }
+  //print_tensor(input, "input "); 
+  //print_tensor(hx, "hx "); 
+  //print_tensor(weight_ih, "weight_ih");
+  //print_tensor(weight_hh, "weight_hh");
+  //print_tensor(bias, "bias");
   auto input_size_wx = weight_ih.size(1);
   auto hidden_size_wx = weight_hh.size(0) / num_gates;
   auto hidden_size_wh = weight_ih.size(0) / num_gates;
   AT_ASSERTM(input_size_wx == input_size, "input size mismatch");
   AT_ASSERTM(hidden_size_wx == hidden_size, "hidden size mismatch");
   AT_ASSERTM(hidden_size_wh == hidden_size, "hidden size mismatch");
+
 
 try {
   auto rnn_cell_ = rnn_cell::desc(rnn_algo, rnn_activation);
@@ -295,16 +307,6 @@ try {
   return std::make_tuple(output, hy, cy, workspace);
 }
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
-    const Tensor& input, TensorList weight, const Tensor& hidden,
-    int64_t celltype) {
-  auto hy = at::empty_like(input);
-  auto output = at::empty_like(input);
-  auto workspace = at::empty_like(hy);
-  return std::make_tuple(output, hy, workspace);
-}
-
-
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
     const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx, const Tensor& cx,
@@ -326,7 +328,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
   // TODO: cache hidden_in, hidden_out from forward?
   // NB: MKLDNN requires to concat hx and cx for lstm
   Tensor hidden_in, hidden_out, grad_hidden_out, grad_hidden_in, grad_hx, grad_cx;
-  if (celltype == 1) {
+  if (celltype == MKLDNN_LSTM) {
     hidden_in = at::cat({hx, cx}, 0);
     hidden_out = at::cat({hy, cy}, 0);
     if(grad_hy.defined() && grad_cy.defined()) {
@@ -382,7 +384,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
   int32_t time_step = input.size(0);
   int32_t batch_size = input.size(1);
   int32_t input_size = input.size(2);
-  int32_t hidden_size = hx.size(1);
+  int32_t hidden_size = hx.size(2);
   
   //std::cout<<"backward, T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
 
@@ -399,15 +401,15 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
   int32_t num_gates = 4;
   int32_t num_states = 2;
   int32_t additional_bias = 0;
-  if (celltype == 0 ) {
+  if (celltype == MKLDNN_RNN_TANH ) {
     rnn_algo = algorithm::vanilla_rnn;
     num_gates = 1;
     num_states = 1;
-  } else if(celltype == 1){
+  } else if(celltype == MKLDNN_LSTM){
     rnn_algo = algorithm::vanilla_lstm;
     num_gates = 4;
     num_states = 2;
-  } else if(celltype == 2){
+  } else if(celltype == MKLDNN_GRU){
     rnn_algo = algorithm::gru_linear_before_reset;
     num_gates = 3;
     num_states = 1;
@@ -543,7 +545,7 @@ try{
   grad_weights.emplace_back(grad_weight_hh);
   if (weight.size() == 4) {
 #if 1
-    if (celltype == 2) {
+    if (celltype == MKLDNN_GRU) {
       //print_tensor(weight[2], "weight[2]");
       auto grad_bx = at::zeros_like(weight[2]);
       //auto grad_bx = at::zeros({3 * hidden_size}, grad_bias.options());

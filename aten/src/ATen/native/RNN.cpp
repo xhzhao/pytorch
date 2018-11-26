@@ -224,51 +224,6 @@ struct Layer {
   virtual output_type operator()(const io_type& input, const hidden_type& input_hidden, const param_type& params) const = 0;
 };
 
-template <typename hidden_type>
-struct MkldnnRNNWrapper {
-  std::tuple<Tensor, Tensor> rnn_forward(std::vector<Tensor> step_inputs,
-    const hidden_type& hidden, const CellParams& params, int64_t celltype) {
-      std::vector<Tensor> weight;
-      weight.emplace_back(params.w_ih);
-      weight.emplace_back(params.w_hh);
-      if(params.b_ih.defined() && params.b_hh.defined()) {
-        weight.emplace_back(params.b_ih);
-        weight.emplace_back(params.b_hh);
-      }
-      auto input = at::stack(step_inputs);
-      auto cx_empty = at::empty({0}, hidden.options());
-      auto bs_empty = at::empty({0}, hidden.options());
-      auto result = at::mkldnn_rnn(input, bs_empty, weight, hidden, cx_empty, celltype);
-      auto output = std::get<0>(result);
-      auto hy = std::get<1>(result);
-      return std::make_tuple(output, hy);
-  }
-};
-
-template <>
-struct MkldnnRNNWrapper <std::tuple<Tensor,Tensor>> {
-  std::tuple<Tensor, std::tuple<Tensor,Tensor>> rnn_forward(std::vector<Tensor> step_inputs,
-    const std::tuple<Tensor,Tensor> hidden, const CellParams& params, int64_t celltype) {
-      auto hx = std::get<0>(hidden);
-      auto cx = std::get<1>(hidden);
-      std::vector<Tensor> weight;
-      weight.emplace_back(params.w_ih);
-      weight.emplace_back(params.w_hh);
-      if(params.b_ih.defined() && params.b_hh.defined()) {
-        weight.emplace_back(params.b_ih);
-        weight.emplace_back(params.b_hh);
-      }
-      auto input = at::stack(step_inputs);
-      auto bs_empty = at::empty({0}, hx.options());
-      auto result = at::mkldnn_rnn(input, bs_empty, weight, hx, cx, celltype);
-      auto output = std::get<0>(result);
-      auto hy = std::get<1>(result);
-      auto cy = std::get<2>(result);
-      auto hidden_out = std::make_tuple(hy, cy);
-      return std::make_tuple(output, hidden_out);
-  }
-};
-
 template<typename hidden_type>
 struct FullLayer : Layer<Tensor, hidden_type, CellParams> {
   using output_type = typename Layer<Tensor, hidden_type, CellParams>::output_type;
@@ -279,35 +234,13 @@ struct FullLayer : Layer<Tensor, hidden_type, CellParams> {
 
   unstacked_output_type operator()(std::vector<Tensor> step_inputs, const hidden_type& input_hidden, const CellParams& params) const {
 
-    CellType celltype = getCellType();
-    if (at::userEnabledMKLDNN()) {
-
-      //std::cout<< "enable mkldnn for RNN, type = "<< celltype << std::endl;
-
-      MkldnnRNNWrapper<hidden_type> mkldnnwrapper;
-      auto result = mkldnnwrapper.rnn_forward(step_inputs,input_hidden,params, (int64_t)celltype);
-      auto outputs = std::get<0>(result);
-      //std::cout<<"outputs.size(0) = "<<outputs.size(0)<<std::endl;
-      //std::cout<<"outputs.size(1) = "<<outputs.size(1)<<std::endl;
-      //std::cout<<"outputs.size(2) = "<<outputs.size(2)<<std::endl;
-      std::vector<Tensor> step_outputs; 
-      for(size_t i = 0; i < outputs.size(0); i++) {
-        step_outputs.push_back(outputs[i]);
-      }
-
-      auto hidden = std::get<1>(result);
-      return {step_outputs, hidden};
-
-    } else {
-      //std::cout<< "disable mkldnn for RNN, type = "<< getCellType() << std::endl;
-      std::vector<Tensor> step_outputs;
-      auto hidden = input_hidden;
-      for (size_t i = 0; i < step_inputs.size(); i++) {
-        hidden = cell_(step_inputs[i], hidden, params);
-        step_outputs.push_back(hidden_as_output(hidden));
-      }
-      return {step_outputs, hidden};
+    std::vector<Tensor> step_outputs;
+    auto hidden = input_hidden;
+    for (size_t i = 0; i < step_inputs.size(); i++) {
+      hidden = cell_(step_inputs[i], hidden, params);
+      step_outputs.push_back(hidden_as_output(hidden));
     }
+    return {step_outputs, hidden};
   }
 
   output_type operator()(const Tensor& inputs, const hidden_type& input_hidden, const CellParams& params) const override {
@@ -569,6 +502,49 @@ std::tuple<io_type, Tensor, Tensor> _lstm_impl(
 
 } // anonymous namespace
 
+#define MKLDNN_RNN_TANH  0
+#define MKLDNN_RNN_RELU  1
+#define MKLDNN_GRU       2
+#define MKLDNN_LSTM      3
+
+#define DEFINE_MKLDNN_RNN(NAME, CELLTYPE) \
+void NAME##_mkldnn_stub(Tensor& output, Tensor& hy,                                  \
+      const Tensor& input, const Tensor& hx,                                   \
+      TensorList params, bool has_biases,                                      \
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) { \
+    int64_t celltype = CELLTYPE;                                              \
+    auto bs_empty = at::empty({0}, hx.options());                              \
+    auto cx_empty = at::empty({0}, hx.options());                              \
+    auto result = at::mkldnn_rnn(input, bs_empty, params, hx,  cx_empty, (int64_t)celltype);\
+    output = std::get<0>(result);                                              \
+    hy = std::get<1>(result);                                                  \
+}                                                                              \
+                                                                               \
+void NAME##_packed_mkldnn_stub(Tensor& output, Tensor& hy,                           \
+      const Tensor& data, const Tensor& batch_sizes, const Tensor& hx,         \
+      TensorList params, bool has_biases,                                      \
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {  \
+}                                                                              \
+
+DEFINE_MKLDNN_RNN(gru, MKLDNN_GRU)
+DEFINE_MKLDNN_RNN(rnn_tanh, MKLDNN_RNN_TANH)
+DEFINE_MKLDNN_RNN(rnn_relu, MKLDNN_RNN_RELU)
+
+
+void lstm_mkldnn_stub(Tensor& output, Tensor& hy, Tensor& cy,
+      const Tensor& input, TensorList hx,
+      TensorList params, bool has_biases,
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+
+    int64_t celltype = MKLDNN_LSTM;
+    auto bs_empty = at::empty({0}, hx[0].options());
+    auto result = at::mkldnn_rnn(input, bs_empty, params, hx[0], hx[1], (int64_t)celltype);
+    output = std::get<0>(result);
+    hy = std::get<1>(result);
+    cy = std::get<2>(result);
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // PUBLIC FUNCTIONS
 ////////////////////////////////////////////////////////////////////////////////
@@ -586,6 +562,12 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   if (at::cudnn_is_acceptable(_input)) {                                       \
     Tensor output, hy;                                                         \
     NAME##_cudnn_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
+            num_layers, dropout_p, train, bidirectional, batch_first);         \
+    return std::make_tuple(output, hy);                                        \
+  }                                                                            \
+  if (at::userEnabledMKLDNN()) {                                       \
+    Tensor output, hy;                                                         \
+    NAME##_mkldnn_stub(output, hy, _input, hx, _params, has_biases, \
             num_layers, dropout_p, train, bidirectional, batch_first);         \
     return std::make_tuple(output, hy);                                        \
   }                                                                            \
@@ -617,6 +599,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   return std::make_tuple(packed_output.data, std::get<1>(result));             \
 }
 
+
 ONE_HIDDEN_RNN(gru, GRUCell)
 ONE_HIDDEN_RNN(rnn_tanh, SimpleCell<tanh_f>)
 ONE_HIDDEN_RNN(rnn_relu, SimpleCell<relu_f>)
@@ -625,6 +608,11 @@ DEFINE_DISPATCH(lstm_cudnn_stub);
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub, lstm_fn);
 REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub, lstm_packed_fn);
+
+
+
+
+
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
@@ -638,6 +626,25 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
             num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(output, hy, cy);
   }
+
+  if (at::userEnabledMKLDNN()) {
+    Tensor output, hy, cy;
+    lstm_mkldnn_stub(output, hy, cy, _input, hx, _params, has_biases,
+            num_layers, dropout_p, train, bidirectional, batch_first);
+    return std::make_tuple(output, hy, cy);
+  }
+
+/*
+  if (at::userEnabledMKLDNN()) {
+    int64_t celltype = 1;
+    auto bs_empty = at::empty({0}, hx[0].options());
+    auto result = at::mkldnn_rnn(_input, bs_empty, _params, hx[0], hx[1], (int64_t)celltype);
+    auto outputs = std::get<0>(result);
+    auto hy = std::get<1>(result);
+    auto cy = std::get<2>(result);
+    return std::make_tuple(outputs, hy, cy);
+  }
+*/
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   auto params = gather_params(_params, has_biases);
   auto results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
