@@ -149,15 +149,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_call(
   int32_t batch_size = input.size(1);
   int32_t input_size = input.size(2);
   int32_t hidden_size = hx.size(2);
-  Tensor output = at::empty({time_step, batch_size, hidden_size});
-  std::cout<<"forward, celltype = "<< celltype<<", L = "<<num_layers<<", T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
-  std::cout<<"weight.size() = "<<weight.size()<<std::endl;
+
+
 
   int32_t num_directions = bidirectional ? 2 : 1;
   auto format_tnc = memory::format::tnc;
   auto format_ldgoi = memory::format::ldgoi;
   auto format_ldgo = memory::format::ldgo;
   auto format_ldsnc = memory::format::ldsnc;
+
+  std::cout<<"forward, celltype = "<< celltype<<", L = "<<num_layers<<", D = "<<num_directions<<std::endl;
+  std::cout<<"forward, T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
+  std::cout<<"weight.size() = "<<weight.size()<<std::endl;
 
   auto rnn_prop = train ? prop_kind::forward_training : prop_kind::forward_inference;
   algorithm rnn_algo;
@@ -182,6 +185,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_call(
   AT_ASSERTM(celltype >= MKLDNN_RNN_TANH && celltype <= MKLDNN_LSTM , "celltype invalid");
 
   auto rnn_dir = rnn_direction::unidirectional_left2right;
+  if (bidirectional) {
+    rnn_dir = rnn_direction::bidirectional_concat;
+  }
+  Tensor output = at::empty({time_step, batch_size, hidden_size * num_directions});
   //print_tensor(weight[0], "weight[0]");
   auto weight_ih = weight[0]; 
   auto weight_hh = weight[1]; 
@@ -230,7 +237,7 @@ try {
   memory::dims weight_hh_tz = {num_layers, num_directions, hidden_size, num_gates, hidden_size};
   memory::dims bias_tz = {num_layers, num_directions, num_gates + additional_bias, hidden_size};
   memory::dims hidden_tz = {num_layers, num_directions, num_states, batch_size, hidden_size};
-  memory::dims output_tz = {time_step, batch_size, hidden_size};
+  memory::dims output_tz = {time_step, batch_size, hidden_size*num_directions};
 
   auto input_md = _format_md(input_tz, format_tnc);
   auto hidden_md = _generic_md(hidden_tz);
