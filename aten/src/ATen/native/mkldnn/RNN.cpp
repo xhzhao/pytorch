@@ -330,16 +330,18 @@ void weigth_fit_mkldnn(std::vector<Tensor>& weight_dst, TensorList weight, int64
   std::cout << "weight.size() = "<< weight.size()<<", weight_len = "<<weight_len<<std::endl;
   AT_ASSERTM(weight.size() == weight_len, "weight.size() mismatch with weight_len");
 
-  Tensor weight_ih = at::empty({num_layers * num_directions, num_gates * hidden_size, hidden_size});
-  Tensor weight_hh = at::empty({num_layers * num_directions, num_gates * hidden_size, hidden_size});
-  Tensor bias_ih = at::empty({num_layers * num_directions, num_gates * hidden_size}); 
-  Tensor bias_hh = at::empty({num_layers * num_directions, num_gates * hidden_size});
+  Tensor weight_ih = at::empty({num_layers * num_directions, num_gates * hidden_size, hidden_size}, weight[0].options());
+  Tensor weight_hh = at::empty({num_layers * num_directions, num_gates * hidden_size, hidden_size}, weight[0].options());
+  Tensor bias_ih = at::empty({num_layers * num_directions, num_gates * hidden_size}, weight[0].options()); 
+  Tensor bias_hh = at::empty({num_layers * num_directions, num_gates * hidden_size}, weight[0].options());
+  //weight_ih.set_requires_grad(false);
   int index = 0;
   for (int i = 0; i < weight_len; ) {
     std::cout <<"index = "<<index<<", i = "<<i<<std::endl;
     //print_tensor(weight_ih[index], "weight_ih[index]");
     //print_tensor(weight[i] , "weight[i]");
     weight_ih[index].copy_(weight[i++]);
+    std::cout <<"index = "<<index<<", i = "<<i<<std::endl;
     weight_hh[index].copy_(weight[i++]);
     if (has_biases) {
       bias_ih[index].copy_(weight[i++]);
@@ -362,8 +364,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
   int32_t input_size = input.size(2);
   int32_t hidden_size = hx.size(2);
 
-  if ((input_size != hidden_size) || (bidirectional && (num_layers > 1))) {
+  if (bidirectional && (num_layers > 1)) {
     //call mkldnn rnn api layer by layer if layer > 1 and direction > 1
+
+  } else if (input_size != hidden_size) {
+    //call mkldnn rnn api twice if input_size != hidden_size
   } else {
     // flatten weight
     std::vector<Tensor> weight_dst;
@@ -375,8 +380,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
 
 }
 
-std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
-    const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx, const Tensor& cx,
+std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward_call(
+    const Tensor& input, const Tensor& batch_sizes, std::vector<Tensor> weight, const Tensor& hx, const Tensor& cx,
     const Tensor& y, const Tensor& hy, const Tensor& cy, const Tensor& grad_y, const Tensor& grad_hy, const Tensor& grad_cy,
     const Tensor& workspace, int64_t celltype, bool has_biases, int64_t num_layers, double dropout_p, bool train,
     bool bidirectional, bool batch_first) {
@@ -397,23 +402,23 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
   // NB: MKLDNN requires to concat hx and cx for lstm
   Tensor hidden_in, hidden_out, grad_hidden_out, grad_hidden_in, grad_hx, grad_cx;
   if (celltype == MKLDNN_LSTM) {
-    hidden_in = at::cat({hx, cx}, 0);
-    hidden_out = at::cat({hy, cy}, 0);
+    hidden_in = at::cat({hx, cx}, 1);
+    hidden_out = at::cat({hy, cy}, 1);
     if(grad_hy.defined() && grad_cy.defined()) {
-      grad_hidden_out = at::cat({grad_hy, grad_cy}, 0);
+      grad_hidden_out = at::cat({grad_hy, grad_cy}, 1);
     } else if(grad_hy.defined()) {
       auto grad_cy_zeros = at::zeros_like(cy);
-      grad_hidden_out = at::cat({grad_hy, grad_cy_zeros}, 0);
+      grad_hidden_out = at::cat({grad_hy, grad_cy_zeros}, 1);
     } else if(grad_cy.defined()) {
       auto grad_hy_zeros = at::zeros_like(hy);
-      grad_hidden_out = at::cat({grad_hy_zeros, grad_cy}, 0);
+      grad_hidden_out = at::cat({grad_hy_zeros, grad_cy}, 1);
     } else {
       auto grad_hy_zeros = at::zeros_like(hy);
       auto grad_cy_zeros = at::zeros_like(cy);
-      grad_hidden_out = at::cat({grad_hy_zeros, grad_cy_zeros}, 0);
+      grad_hidden_out = at::cat({grad_hy_zeros, grad_cy_zeros}, 1);
     }
     grad_hidden_in = at::empty_like(grad_hidden_out);
-    std::vector<Tensor> hidden_arr = grad_hidden_in.chunk(2, 0);
+    std::vector<Tensor> hidden_arr = grad_hidden_in.chunk(2, 1);
     grad_hx = hidden_arr[0];
     grad_cx = hidden_arr[1];
   } else {
@@ -442,11 +447,8 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
   //print_tensor(grad_hidden_out, "grad_hy");
 
   auto grad_input = at::empty_like(input);
-
   auto cpu_engine = CpuEngine::Instance().get_engine();
   auto null_memory_ = null_memory(cpu_engine);
-
-  //int32_t num_layers = 1;
   int32_t num_directions = bidirectional ? 2 : 1;
 
   int32_t time_step = input.size(0);
@@ -462,7 +464,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
   auto format_ldsnc = memory::format::ldsnc;
 
   auto rnn_prop = prop_kind::backward;
-  auto rnn_dir = rnn_direction::unidirectional_left2right;
+  auto rnn_dir = bidirectional ? rnn_direction::bidirectional_concat : rnn_direction::unidirectional_left2right;
 
   algorithm rnn_algo;
   algorithm rnn_activation = algorithm::eltwise_tanh;
@@ -487,7 +489,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
 
   auto weight_ih = weight[0];
   auto weight_hh = weight[1];
-  Tensor bias = at::zeros({(num_gates + additional_bias) * hidden_size}, weight[0].options());
+  Tensor bias = at::zeros({num_layers * num_directions, (num_gates + additional_bias) * hidden_size}, weight[0].options());
   auto grad_weight_ih = at::zeros_like(weight_ih);
   auto grad_weight_hh = at::zeros_like(weight_hh);
   auto grad_bias = at::zeros_like(bias);
@@ -497,7 +499,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
   memory::dims weight_hh_tz = {num_layers, num_directions, hidden_size, num_gates, hidden_size};
   memory::dims bias_tz = {num_layers, num_directions, num_gates + additional_bias, hidden_size};
   memory::dims hidden_tz = {num_layers, num_directions, num_states, batch_size, hidden_size};
-  memory::dims output_tz = {time_step, batch_size, hidden_size};
+  memory::dims output_tz = {time_step, batch_size, hidden_size * num_directions};
 
   auto input_md = _format_md(input_tz, format_tnc);
   auto hidden_md = _generic_md(hidden_tz);
@@ -574,35 +576,13 @@ try{
   net.push_back(rnn_backward(rnn_backward_pd, input_mem, hidden_in_mem, weight_ih_mem, weight_hh_mem, bias_mem,
     output_mem, hidden_out_mem, grad_input_usr_mem, grad_hidden_in_usr_mem, grad_weight_ih_mem, grad_weight_hh_mem,
     grad_bias_usr_mem, grad_output_mem, grad_hidden_out_mem, workspace_mem));
-
   if (grad_weight_ih_mem != grad_weight_ih_usr_mem) {
     net.push_back(reorder(grad_weight_ih_mem, grad_weight_ih_usr_mem));
   }
   if (grad_weight_hh_mem != grad_weight_hh_usr_mem) {
     net.push_back(reorder(grad_weight_hh_mem, grad_weight_hh_usr_mem));
   }
-
-
-/*
-  if (grad_input_mem != grad_input_usr_mem) {
-    net.push_back(reorder(grad_input_mem, grad_input_usr_mem));
-  }
-  if (grad_hidden_in_mem != grad_hidden_in_usr_mem) {
-    net.push_back(reorder(grad_hidden_in_mem, grad_hidden_in_usr_mem));
-  }
-  if (grad_weight_ih_mem != grad_weight_ih_usr_mem) {
-    net.push_back(reorder(grad_weight_ih_mem, grad_weight_ih_usr_mem));
-  }
-  if (grad_weight_hh_mem != grad_weight_hh_usr_mem) {
-    net.push_back(reorder(grad_weight_hh_mem, grad_weight_hh_usr_mem));
-  }
-  if (grad_bias_mem != grad_bias_usr_mem) {
-    net.push_back(reorder(grad_bias_mem, grad_bias_usr_mem));
-  }
-*/
   Stream::Instance().get_stream().submit(net);
-
-
   //print_tensor(grad_weight_ih_mem, "grad_weight_ih_mem");
   //print_tensor(grad_weight_ih_usr_mem, "grad_weight_ih_usr_mem");
 } catch (error &e) {
@@ -611,39 +591,38 @@ try{
   std::vector<Tensor> grad_weights;
   grad_weights.emplace_back(grad_weight_ih);
   grad_weights.emplace_back(grad_weight_hh);
-  if (weight.size() == 4) {
-#if 1
+  if (has_biases) {
     if (celltype == MKLDNN_GRU) {
-      //print_tensor(weight[2], "weight[2]");
-      auto grad_bx = at::zeros_like(weight[2]);
-      //auto grad_bx = at::zeros({3 * hidden_size}, grad_bias.options());
-      auto grad_bh = at::zeros({3 * hidden_size}, grad_bias.options());
-      std::vector<Tensor> grad_bx_chunk = grad_bx.chunk(3, 0);
-      std::vector<Tensor> grad_bh_chunk = grad_bh.chunk(3, 0);
-      std::vector<Tensor> chunks = grad_bias.chunk(4, 0);
-      //print_tensor(grad_bx_chunk[0], "grad_bx_chunk[0]");
-      //print_tensor(chunks[0], "chunks[0]");
-      grad_bx_chunk[0].copy_(chunks[0]);
-      grad_bh_chunk[0].copy_(chunks[0]);
-      grad_bx_chunk[1].copy_(chunks[1]);
-      grad_bh_chunk[1].copy_(chunks[1]);
-      grad_bx_chunk[2].copy_(chunks[2]);
-      grad_bh_chunk[2].copy_(chunks[3]);
+      print_tensor(grad_bias, "grad_bias");
+      //auto grad_bx = at::zeros_like(weight[2]);
+      auto grad_bx = at::zeros({num_layers * num_directions, 3 * hidden_size}, grad_bias.options());
+      auto grad_bh = at::zeros({num_layers * num_directions, 3 * hidden_size}, grad_bias.options());
+      for (int l = 0; l < num_layers * num_directions; l++) {
+        auto grad_bx_l = grad_bx[l];
+        auto grad_bh_l = grad_bh[l];
+        auto grad_bias_l = grad_bias[l];
+        std::vector<Tensor> grad_bx_chunk = grad_bx_l.chunk(3, 0);
+        std::vector<Tensor> grad_bh_chunk = grad_bh_l.chunk(3, 0);
+        std::vector<Tensor> chunks = grad_bias_l.chunk(4, 0);
+        //print_tensor(grad_bx_chunk[0], "grad_bx_chunk[0]");
+        //print_tensor(chunks[0], "chunks[0]");
+        grad_bx_chunk[0].copy_(chunks[0]);
+        grad_bh_chunk[0].copy_(chunks[0]);
+        grad_bx_chunk[1].copy_(chunks[1]);
+        grad_bh_chunk[1].copy_(chunks[1]);
+        grad_bx_chunk[2].copy_(chunks[2]);
+        grad_bh_chunk[2].copy_(chunks[3]);
+      }
 
       grad_weights.emplace_back(grad_bx);
       grad_weights.emplace_back(grad_bh);
-      //print_tensor(grad_bias, "grad_bias");
-      //print_tensor(grad_bx, "grad_bx");
-      //print_tensor(grad_bh, "grad_bh");
+      print_tensor(grad_bias, "grad_bias");
+      print_tensor(grad_bx, "grad_bx");
+      print_tensor(grad_bh, "grad_bh");
     } else {
       grad_weights.emplace_back(grad_bias);
       grad_weights.emplace_back(grad_bias);
     }
-#else
-
-      grad_weights.emplace_back(grad_bias);
-      grad_weights.emplace_back(grad_bias);
-#endif
   }
 
 
@@ -651,6 +630,30 @@ try{
 
 }
 
+std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
+    const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx, const Tensor& cx,
+    const Tensor& y, const Tensor& hy, const Tensor& cy, const Tensor& grad_y, const Tensor& grad_hy, const Tensor& grad_cy,
+    const Tensor& workspace, int64_t celltype, bool has_biases, int64_t num_layers, double dropout_p, bool train,
+    bool bidirectional, bool batch_first) {
+  int32_t input_size = input.size(2);
+  int32_t hidden_size = hx.size(2);
+
+  if (bidirectional && (num_layers > 1)) {
+    //call mkldnn rnn api layer by layer if layer > 1 and direction > 1
+
+  } else if (input_size != hidden_size) {
+    //call mkldnn rnn api twice if input_size != hidden_size
+  } else {
+    // flatten weight
+    std::vector<Tensor> weight_dst;
+    std::cout <<"weigth_fit_mkldnn start" <<std::endl;
+    weigth_fit_mkldnn(weight_dst, weight, celltype, has_biases, num_layers, bidirectional, input_size, hidden_size);
+    std::cout <<"weigth_fit_mkldnn done" <<std::endl;
+    //call mkldnn rnn api directly
+    auto result = mkldnn_rnn_backward_call(input,batch_sizes,weight_dst,hx,cx,y,hy,cy,grad_y,grad_hy,grad_cy,workspace,celltype,has_biases,num_layers,dropout_p,train,bidirectional,batch_first);
+    return result;
+  }
+}
 Tensor mkldnn_rnn_flatten_weight(
     TensorList weight_arr, int64_t weight_stride0,
     int64_t input_size,
