@@ -123,15 +123,15 @@ void print_tensor(Tensor t, std::string name) {
 }
 
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
-    const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx, const Tensor& cx,
+std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_call(
+    const Tensor& input, const Tensor& batch_sizes, std::vector<Tensor> weight, const Tensor& hx, const Tensor& cx,
     int64_t celltype, bool has_biases, int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   //std::cout<<"mkldnn_rnn_lstm call start, celltype = "<< celltype<< std::endl;
   Tensor hidden_in, hidden_out, hy, cy;
   if (celltype == MKLDNN_LSTM) {
-    hidden_in = at::cat({hx, cx}, 0);
+    hidden_in = at::cat({hx, cx}, 1);
     hidden_out = at::empty_like(hidden_in);
-    std::vector<Tensor> hidden_arr = hidden_out.chunk(2, 0);
+    std::vector<Tensor> hidden_arr = hidden_out.chunk(2, 1);
     hy = hidden_arr[0];
     cy = hidden_arr[1];
   } else {
@@ -140,7 +140,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
     hy = hidden_out;
     cy = at::empty({0}, hx.options()); // NB: Not allowed to return undefined tensors
   }
-
 
   auto workspace = at::empty({0}, input.options());
   auto cpu_engine = CpuEngine::Instance().get_engine();
@@ -151,20 +150,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
   int32_t input_size = input.size(2);
   int32_t hidden_size = hx.size(2);
   Tensor output = at::empty({time_step, batch_size, hidden_size});
-  //print_tensor(input, "input "); 
-  //print_tensor(hx, "hx "); 
-  //std::cout<<"forward, T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
+  std::cout<<"forward, celltype = "<< celltype<<", L = "<<num_layers<<", T = "<<time_step<<", N = "<<batch_size<<", I = "<<input_size<<", H = "<<hidden_size<<std::endl;
+  std::cout<<"weight.size() = "<<weight.size()<<std::endl;
 
-  //int32_t num_layers = 1;
-  int32_t num_directions = 1;
-
-
+  int32_t num_directions = bidirectional ? 2 : 1;
   auto format_tnc = memory::format::tnc;
   auto format_ldgoi = memory::format::ldgoi;
   auto format_ldgo = memory::format::ldgo;
   auto format_ldsnc = memory::format::ldsnc;
-
-  //auto train = true;
 
   auto rnn_prop = train ? prop_kind::forward_training : prop_kind::forward_inference;
   algorithm rnn_algo;
@@ -185,23 +178,30 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
     num_gates = 3;
     num_states = 1;
     additional_bias = 1;
-  } 
+  }
+  AT_ASSERTM(celltype >= MKLDNN_RNN_TANH && celltype <= MKLDNN_LSTM , "celltype invalid");
+
   auto rnn_dir = rnn_direction::unidirectional_left2right;
-
-  auto weight_ih = weight[0]; //.t().clone();
-  auto weight_hh = weight[1]; //.t().clone();
+  //print_tensor(weight[0], "weight[0]");
+  auto weight_ih = weight[0]; 
+  auto weight_hh = weight[1]; 
   Tensor bias;
-  if (weight.size() == 4) {
+  if (has_biases) {
     if (celltype == MKLDNN_GRU){
-      //bias = at::empty({num_layers, num_directions, num_gates + additional_bias, hidden_size});
-      bias = at::empty({num_gates + additional_bias, hidden_size});
-      auto bias_wx = weight[2].chunk(3, 0);
-      auto bias_wh = weight[3].chunk(3, 0);
-      bias[0] = bias_wx[0] + bias_wh[0];
-      bias[1] = bias_wx[1] + bias_wh[1];
-      bias[2] = bias_wx[2];
-      bias[3] = bias_wh[2];
-
+      bias= at::empty({num_layers * num_directions, num_gates + additional_bias, hidden_size});
+      //print_tensor(weight[2], "weight[2]");
+      //print_tensor(weight[3], "weight[3]");
+      for (int l = 0; l < num_layers * num_directions; l++) {
+        auto bias_l = bias[l];
+        auto weight2_l = weight[2][l];
+        auto weight3_l = weight[3][l];
+        auto bias_wx = weight2_l.chunk(3, 0); 
+        auto bias_wh = weight3_l.chunk(3, 0); 
+        bias_l[0] = bias_wx[0] + bias_wh[0];
+        bias_l[1] = bias_wx[1] + bias_wh[1];
+        bias_l[2] = bias_wx[2];
+        bias_l[3] = bias_wh[2];
+      }
       //print_tensor(bias, "bias");
     } else {
       bias = weight[2] + weight[3];
@@ -215,9 +215,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
   //print_tensor(weight_ih, "weight_ih");
   //print_tensor(weight_hh, "weight_hh");
   //print_tensor(bias, "bias");
-  auto input_size_wx = weight_ih.size(1);
-  auto hidden_size_wx = weight_hh.size(0) / num_gates;
-  auto hidden_size_wh = weight_ih.size(0) / num_gates;
+  auto input_size_wx = weight_ih.size(2);
+  auto hidden_size_wx = weight_hh.size(1) / num_gates;
+  auto hidden_size_wh = weight_ih.size(1) / num_gates;
   AT_ASSERTM(input_size_wx == input_size, "input size mismatch");
   AT_ASSERTM(hidden_size_wx == hidden_size, "hidden size mismatch");
   AT_ASSERTM(hidden_size_wh == hidden_size, "hidden size mismatch");
@@ -307,6 +307,66 @@ try {
   return std::make_tuple(output, hy, cy, workspace);
 }
 
+void weigth_fit_mkldnn(std::vector<Tensor>& weight_dst, TensorList weight, int64_t celltype, bool has_biases, int64_t num_layers, bool bidirectional, int64_t input_size, int64_t hidden_size) {
+  AT_ASSERTM(hidden_size == input_size, "could not flatten wight if hidden_size != input_size");
+  int32_t num_gates = 4;
+  if (celltype == MKLDNN_RNN_TANH ) {
+    num_gates = 1;
+  } else if(celltype == MKLDNN_LSTM){
+    num_gates = 4;
+  } else if(celltype == MKLDNN_GRU){
+    num_gates = 3;
+  }
+  int num_directions = bidirectional ? 2 : 1;
+  int bias_factor = has_biases ? 4 : 2;
+  int weight_len = num_directions * num_layers * bias_factor;
+  std::cout << "weight.size() = "<< weight.size()<<", weight_len = "<<weight_len<<std::endl;
+  AT_ASSERTM(weight.size() == weight_len, "weight.size() mismatch with weight_len");
+
+  Tensor weight_ih = at::empty({num_layers * num_directions, num_gates * hidden_size, hidden_size});
+  Tensor weight_hh = at::empty({num_layers * num_directions, num_gates * hidden_size, hidden_size});
+  Tensor bias_ih = at::empty({num_layers * num_directions, num_gates * hidden_size}); 
+  Tensor bias_hh = at::empty({num_layers * num_directions, num_gates * hidden_size});
+  int index = 0;
+  for (int i = 0; i < weight_len; ) {
+    std::cout <<"index = "<<index<<", i = "<<i<<std::endl;
+    //print_tensor(weight_ih[index], "weight_ih[index]");
+    //print_tensor(weight[i] , "weight[i]");
+    weight_ih[index].copy_(weight[i++]);
+    weight_hh[index].copy_(weight[i++]);
+    if (has_biases) {
+      bias_ih[index].copy_(weight[i++]);
+      bias_hh[index].copy_(weight[i++]);
+    }
+    index++;
+  } 
+  weight_dst.emplace_back(weight_ih);
+  weight_dst.emplace_back(weight_hh);
+  if (has_biases) {
+    weight_dst.emplace_back(bias_ih);
+    weight_dst.emplace_back(bias_hh);
+  }
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
+    const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx, const Tensor& cx,
+    int64_t celltype, bool has_biases, int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+
+  int32_t input_size = input.size(2);
+  int32_t hidden_size = hx.size(2);
+
+  if ((input_size != hidden_size) || (bidirectional && (num_layers > 1))) {
+    //call mkldnn rnn api layer by layer if layer > 1 and direction > 1
+  } else {
+    // flatten weight
+    std::vector<Tensor> weight_dst;
+    weigth_fit_mkldnn(weight_dst, weight, celltype, has_biases, num_layers, bidirectional, input_size, hidden_size);
+    //call mkldnn rnn api directly
+    auto result = mkldnn_rnn_call(input, batch_sizes, weight_dst, hx, cx, celltype, has_biases, num_layers, dropout_p, train, bidirectional, batch_first);
+    return result;
+  }
+
+}
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
     const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx, const Tensor& cx,
@@ -380,7 +440,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
   auto null_memory_ = null_memory(cpu_engine);
 
   //int32_t num_layers = 1;
-  int32_t num_directions = 1;
+  int32_t num_directions = bidirectional ? 2 : 1;
 
   int32_t time_step = input.size(0);
   int32_t batch_size = input.size(1);
