@@ -3985,19 +3985,19 @@ class TestNN(NNTestCase):
 
             self.assertEqual(output, output_mkldnn)
 
-    def test_MKLDNN_LSTM(self):
+    def test_MKLDNN_RNN(self):
         # this is a test to check MKLDNN LSTM result
-        print("test_MKLDNN_LSTM start")
+        print("test_MKLDNN_RNN start")
         torch.set_printoptions(precision=6)
         rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM, 'gru' : nn.GRU}
         #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM}
         #rnns = {'gru' : nn.GRU}
         #rnns = {'lstm' : nn.LSTM}
         #rnns = {'rnn' : nn.RNN}
-        IsTrain = [True, False]
+        IsTrain = [True]
         Biass = [True, False]
-        #Layers = [1, 2, 3]
-        Layers = [1]
+        Layers = [1,2,3]
+        #Layers = [1]
         #Bidirections = [False, True]
         Bidirections = [False]
         Sizes = [(1, 1, 1, 1),
@@ -4005,7 +4005,8 @@ class TestNN(NNTestCase):
                  (1, 3, 4, 4),
                  (2, 3, 4, 4),
                  (2, 3, 10, 10),
-                 (50, 64, 500, 500)]
+                 (50, 64, 500, 500)
+                 ]
 
         def check_grad_weight(model1, model2, p):
             index = 1
@@ -4058,14 +4059,18 @@ class TestNN(NNTestCase):
                                     output_mkldnn, (hy_mkldnn, cy_mkldnn) = rnn_mkldnn(input_mkldnn, (hx_mkldnn, cx_mkldnn))
                                 else:
                                     output_mkldnn, hy_mkldnn = rnn_mkldnn(input_mkldnn, hx_mkldnn)
-                                p = 2e-4 if seq_length > 10 else 1e-5
-                                self.assertEqual(output, output_mkldnn, prec=p)
-                                self.assertEqual(hy, hy_mkldnn, prec=p)
+                                p = 3e-4 if seq_length > 10 else 1e-5
+
                                 #print("y = ", output)
                                 #print("y_mkldnn = ", output_mkldnn)
                                 #print("hy = ", hy)
                                 #print("hy_mkldnn = ", hy_mkldnn)
+
+                                self.assertEqual(output, output_mkldnn, prec=p)
+                                self.assertEqual(hy, hy_mkldnn, prec=p)
                                 if name is 'lstm':
+                                    #print("cy = ", cy)
+                                    #print("cy_mkldnn = ", cy_mkldnn)
                                     self.assertEqual(cy, cy_mkldnn, prec=p)
                                 if Train:
                                     if name is 'lstm':
