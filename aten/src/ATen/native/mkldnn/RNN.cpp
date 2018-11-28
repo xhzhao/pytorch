@@ -281,8 +281,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_call(
   return std::make_tuple(output, hy, cy, workspace);
 }
 
-void weigth_fit_mkldnn(std::vector<Tensor>& weight_dst, TensorList weight, int64_t celltype, bool has_biases, int64_t num_layers, bool bidirectional, int64_t input_size, int64_t hidden_size) {
-  AT_ASSERTM(hidden_size == input_size, "could not flatten wight if hidden_size != input_size");
+void weigth_fit_mkldnn(std::vector<Tensor>& weight_dst, std::vector<Tensor> weight, int64_t celltype, bool has_biases, int64_t num_layers, bool bidirectional, int64_t input_size, int64_t hidden_size) {
+  //AT_ASSERTM(hidden_size == input_size, "could not flatten wight if hidden_size != input_size");
   int32_t num_gates = 4;
   if (celltype == MKLDNN_RNN_TANH ) {
     num_gates = 1;
@@ -294,10 +294,10 @@ void weigth_fit_mkldnn(std::vector<Tensor>& weight_dst, TensorList weight, int64
   int num_directions = bidirectional ? 2 : 1;
   int bias_factor = has_biases ? 4 : 2;
   int weight_len = num_directions * num_layers * bias_factor;
-  //std::cout << "weight.size() = "<< weight.size()<<", weight_len = "<<weight_len<<std::endl;
+  //std::cout << "weigth_fit_mkldnn start, weight.size() = "<< weight.size()<<", weight_len = "<<weight_len<<std::endl;
   AT_ASSERTM(weight.size() == weight_len, "weight.size() mismatch with weight_len");
 
-  Tensor weight_ih = at::empty({num_layers * num_directions, num_gates * hidden_size, hidden_size}, weight[0].options());
+  Tensor weight_ih = at::empty({num_layers * num_directions, num_gates * hidden_size, input_size}, weight[0].options());
   Tensor weight_hh = at::empty({num_layers * num_directions, num_gates * hidden_size, hidden_size}, weight[0].options());
   Tensor bias_ih = at::empty({num_layers * num_directions, num_gates * hidden_size}, weight[0].options()); 
   Tensor bias_hh = at::empty({num_layers * num_directions, num_gates * hidden_size}, weight[0].options());
@@ -320,7 +320,23 @@ void weigth_fit_mkldnn(std::vector<Tensor>& weight_dst, TensorList weight, int64
     weight_dst.emplace_back(bias_ih);
     weight_dst.emplace_back(bias_hh);
   }
+  //std::cout << "weigth_fit_mkldnn done" << std::endl;
 }
+
+// Parses a flat list of parameter tensors into a list of CellParams
+static std::vector<Tensor> gather_params(TensorList params, bool has_biases) {
+  std::vector<Tensor> result;
+  if (has_biases) {
+    AT_CHECK(params.size() % 4 == 0, "got an incorrect number of RNN parameters");
+  } else {
+    AT_CHECK(params.size() % 2 == 0, "got an incorrect number of RNN parameters");
+  }
+  for (size_t i = 0; i < params.size(); i++) {
+    result.emplace_back(params[i]);
+  }   
+  return result;
+}
+
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
     const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx, const Tensor& cx,
@@ -328,18 +344,59 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
 
   int32_t input_size = input.size(2);
   int32_t hidden_size = hx.size(2);
+  auto weight_vec = gather_params(weight, has_biases);
 
   if ((bidirectional && num_layers > 1) || (dropout_p != 0)) {
-    //call mkldnn rnn api layer by layer if layer > 1 and direction > 1
+    //call mkldnn rnn api layer by layer if layer > 1 and direction > 1 or dropout enabled
+    int num_direction = bidirectional ? 2 : 1;
+    int32_t time_step = input.size(0);
+    int32_t batch_size = input.size(1);
+
+    int32_t hidden_size = hx.size(2);
+    Tensor y = at::empty({time_step, batch_size, hidden_size * num_direction});
+    Tensor hy = at::empty_like(hx);
+    Tensor cy = at::empty_like(cx);
+    Tensor workspace;
+    Tensor x_l = input;
+    auto hx_chunk = hx.chunk(num_layers, 0);
+    auto cx_chunk = cx.chunk(num_layers, 0);
+    auto hy_chunk = hy.chunk(num_layers, 0);
+    auto cy_chunk = cy.chunk(num_layers, 0);
+    int weight_per_layer = has_biases ? 8 : 4;
+    for (int l = 0; l < num_layers; l++) {
+      // caculate layer = 1, direction = 2
+      //std::cout << "-------------layer by layer call start, l = " << l << ", weight_per_layer = " << weight_per_layer << std::endl;
+      auto hx_l = hx_chunk[l];
+      auto cx_l = cx_chunk[l];
+
+      std::vector<Tensor> weight_dst;
+      std::vector<Tensor>::const_iterator first = weight_vec.begin() + l * weight_per_layer;
+      std::vector<Tensor>::const_iterator last = weight_vec.begin() + (l + 1) * weight_per_layer;
+      std::vector<Tensor> weight_l(first, last);
+      int32_t input_size = x_l.size(2);
+      weigth_fit_mkldnn(weight_dst, weight_l, celltype, has_biases, 1, bidirectional, input_size, hidden_size);
+      auto result = mkldnn_rnn_call(x_l, batch_sizes, weight_dst, hx_l, cx_l, celltype, has_biases, 1,
+                                    dropout_p, train, bidirectional, batch_first);
+
+      x_l = std::get<0>(result);
+      hy_chunk[l].copy_(std::get<1>(result));
+      if (celltype == MKLDNN_LSTM) {
+        cy_chunk[l].copy_(std::get<2>(result));
+      }
+      //std::cout << "--------------layer by layer call end, l = " << l << std::endl;
+    }
+    y = x_l;
+    return std::make_tuple(y, hy, cy, workspace);
 
   } else if (input_size != hidden_size) {
     //call mkldnn rnn api twice if input_size != hidden_size
   } else {
     // flatten weight
     std::vector<Tensor> weight_dst;
-    weigth_fit_mkldnn(weight_dst, weight, celltype, has_biases, num_layers, bidirectional, input_size, hidden_size);
+    weigth_fit_mkldnn(weight_dst, weight_vec, celltype, has_biases, num_layers, bidirectional, input_size, hidden_size);
     //call mkldnn rnn api directly
-    auto result = mkldnn_rnn_call(input, batch_sizes, weight_dst, hx, cx, celltype, has_biases, num_layers, dropout_p, train, bidirectional, batch_first);
+    auto result = mkldnn_rnn_call(input, batch_sizes, weight_dst, hx, cx, celltype, has_biases, num_layers,
+                                  dropout_p, train, bidirectional, batch_first);
     return result;
   }
 
@@ -587,16 +644,16 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
     bool bidirectional, bool batch_first) {
   int32_t input_size = input.size(2);
   int32_t hidden_size = hx.size(2);
-
-  if (bidirectional && (num_layers > 1)) {
-    //call mkldnn rnn api layer by layer if layer > 1 and direction > 1
+  auto weight_vec = gather_params(weight, has_biases);
+  if ((bidirectional && num_layers > 1) || (dropout_p != 0)) {
+    //call mkldnn rnn api layer by layer if layer > 1 and direction > 1 or dropout enabled
 
   } else if (input_size != hidden_size) {
     //call mkldnn rnn api twice if input_size != hidden_size
   } else {
     // flatten weight
     std::vector<Tensor> weight_dst;
-    weigth_fit_mkldnn(weight_dst, weight, celltype, has_biases, num_layers, bidirectional, input_size, hidden_size);
+    weigth_fit_mkldnn(weight_dst, weight_vec, celltype, has_biases, num_layers, bidirectional, input_size, hidden_size);
     //call mkldnn rnn api directly
     auto result = mkldnn_rnn_backward_call(input,batch_sizes,weight_dst,hx,cx,y,hy,cy,grad_y,grad_hy,grad_cy,workspace,celltype,has_biases,num_layers,dropout_p,train,bidirectional,batch_first);
     std::vector<Tensor> grad_weight_dst;
