@@ -3994,12 +3994,12 @@ class TestNN(NNTestCase):
         #rnns = {'gru' : nn.GRU}
         #rnns = {'lstm' : nn.LSTM}
         #rnns = {'rnn' : nn.RNN}
-        IsTrain = [False]
+        IsTrain = [True]
         Biass = [True, False]
         Layers = [1,2,3]
         #Layers = [1]
-        Bidirections = [False, True]
-        #Bidirections = [False]
+        #Bidirections = [False, True]
+        Bidirections = [False]
         Sizes = [(1, 1, 1, 1),
                  (1, 1, 4, 4),
                  (1, 3, 4, 4),

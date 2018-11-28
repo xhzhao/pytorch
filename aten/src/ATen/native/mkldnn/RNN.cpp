@@ -123,7 +123,7 @@ void print_tensor(Tensor t, std::string name) {
 }
 
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_call(
+std::vector<Tensor> mkldnn_rnn_call(
     const Tensor& input, const Tensor& batch_sizes, std::vector<Tensor> weight, const Tensor& hx, const Tensor& cx,
     int64_t celltype, bool has_biases, int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   //std::cout<<"mkldnn_rnn_lstm call start, celltype = "<< celltype<< std::endl;
@@ -278,7 +278,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_call(
   } catch (error &e) {
     std::cerr << "message: " << e.message << std::endl;
   }
-  return std::make_tuple(output, hy, cy, workspace);
+  std::vector<Tensor> result;
+  result.emplace_back(output);
+  result.emplace_back(hy);
+  result.emplace_back(cy);
+  result.emplace_back(workspace);
+  return result;
 }
 
 void weigth_fit_mkldnn(std::vector<Tensor>& weight_dst, std::vector<Tensor> weight, int64_t celltype, bool has_biases, int64_t num_layers, bool bidirectional, int64_t input_size, int64_t hidden_size) {
@@ -338,7 +343,7 @@ static std::vector<Tensor> gather_params(TensorList params, bool has_biases) {
 }
 
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
+std::vector<Tensor> mkldnn_rnn(
     const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx, const Tensor& cx,
     int64_t celltype, bool has_biases, int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
 
@@ -362,7 +367,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
     auto cx_chunk = cx.chunk(num_layers, 0);
     auto hy_chunk = hy.chunk(num_layers, 0);
     auto cy_chunk = cy.chunk(num_layers, 0);
-    int weight_per_layer = has_biases ? 8 : 4;
+    int weight_per_layer = has_biases ? 4 * num_direction : 2 * num_direction;
     for (int l = 0; l < num_layers; l++) {
       // caculate layer = 1, direction = 2
       //std::cout << "-------------layer by layer call start, l = " << l << ", weight_per_layer = " << weight_per_layer << std::endl;
@@ -377,16 +382,20 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn(
       weigth_fit_mkldnn(weight_dst, weight_l, celltype, has_biases, 1, bidirectional, input_size, hidden_size);
       auto result = mkldnn_rnn_call(x_l, batch_sizes, weight_dst, hx_l, cx_l, celltype, has_biases, 1,
                                     dropout_p, train, bidirectional, batch_first);
-
-      x_l = std::get<0>(result);
-      hy_chunk[l].copy_(std::get<1>(result));
+      x_l = result[0];
+      hy_chunk[l].copy_(result[1]);
       if (celltype == MKLDNN_LSTM) {
-        cy_chunk[l].copy_(std::get<2>(result));
+        cy_chunk[l].copy_(result[2]);
       }
       //std::cout << "--------------layer by layer call end, l = " << l << std::endl;
     }
     y = x_l;
-    return std::make_tuple(y, hy, cy, workspace);
+    std::vector<Tensor> result;
+    result.emplace_back(y);
+    result.emplace_back(hy);
+    result.emplace_back(cy);
+    result.emplace_back(workspace);
+    return result;
 
   } else if (input_size != hidden_size) {
     //call mkldnn rnn api twice if input_size != hidden_size
@@ -639,11 +648,17 @@ void split_gradweight(std::vector<Tensor>& grad_dst, std::vector<Tensor>grad_wei
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
     const Tensor& input, const Tensor& batch_sizes, TensorList weight, const Tensor& hx, const Tensor& cx,
-    const Tensor& y, const Tensor& hy, const Tensor& cy, const Tensor& grad_y, const Tensor& grad_hy, const Tensor& grad_cy,
-    const Tensor& workspace, int64_t celltype, bool has_biases, int64_t num_layers, double dropout_p, bool train,
+    TensorList fwd_result, TensorList grad_fwd_result,
+    int64_t celltype, bool has_biases, int64_t num_layers, double dropout_p, bool train,
     bool bidirectional, bool batch_first) {
   int32_t input_size = input.size(2);
   int32_t hidden_size = hx.size(2);
+  auto y = fwd_result[0];
+  auto hy = fwd_result[1];
+  auto cy = fwd_result[2];
+  auto grad_y = grad_fwd_result[0];
+  auto grad_hy = grad_fwd_result[1];
+  auto grad_cy = grad_fwd_result[2];
   auto weight_vec = gather_params(weight, has_biases);
   if ((bidirectional && num_layers > 1) || (dropout_p != 0)) {
     //call mkldnn rnn api layer by layer if layer > 1 and direction > 1 or dropout enabled
@@ -654,6 +669,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
     // flatten weight
     std::vector<Tensor> weight_dst;
     weigth_fit_mkldnn(weight_dst, weight_vec, celltype, has_biases, num_layers, bidirectional, input_size, hidden_size);
+    auto workspace  = fwd_result[3];
     //call mkldnn rnn api directly
     auto result = mkldnn_rnn_backward_call(input,batch_sizes,weight_dst,hx,cx,y,hy,cy,grad_y,grad_hy,grad_cy,workspace,celltype,has_biases,num_layers,dropout_p,train,bidirectional,batch_first);
     std::vector<Tensor> grad_weight_dst;

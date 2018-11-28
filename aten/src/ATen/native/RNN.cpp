@@ -517,8 +517,8 @@ void NAME##_mkldnn_stub(Tensor& output, Tensor& hy,                             
   auto cx_empty = at::empty({0}, hx.options());                              \
   auto result = at::mkldnn_rnn(input, bs_empty, params, hx,  cx_empty, (int64_t)celltype,\
     has_biases, num_layers, dropout_p, train, bidirectional, batch_first);\
-  output = std::get<0>(result);                                              \
-  hy = std::get<1>(result);                                                  \
+  output = result[0];                                                          \
+  hy = result[1];                                                              \
 }                                                                              \
                                                                                \
 void NAME##_packed_mkldnn_stub(Tensor& output, Tensor& hy,                           \
@@ -540,9 +540,9 @@ void lstm_mkldnn_stub(Tensor& output, Tensor& hy, Tensor& cy,
   auto bs_empty = at::empty({0}, hx[0].options());
   auto result = at::mkldnn_rnn(input, bs_empty, params, hx[0], hx[1], (int64_t)celltype,
     has_biases, num_layers, dropout_p, train, bidirectional, batch_first);
-  output = std::get<0>(result);
-  hy = std::get<1>(result);
-  cy = std::get<2>(result);
+  output = result[0];
+  hy = result[1];
+  cy = result[2];
 }
 
 
