@@ -3989,17 +3989,18 @@ class TestNN(NNTestCase):
         # this is a test to check MKLDNN LSTM result
         print("test_MKLDNN_RNN start")
         torch.set_printoptions(precision=6)
-        rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM, 'gru' : nn.GRU}
+        #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM, 'gru' : nn.GRU}
         #rnns = {'rnn' : nn.RNN, 'lstm' : nn.LSTM}
         #rnns = {'gru' : nn.GRU}
-        #rnns = {'lstm' : nn.LSTM}
+        rnns = {'lstm' : nn.LSTM}
         #rnns = {'rnn' : nn.RNN}
         IsTrain = [True]
-        Biass = [True, False]
+        #IsTrain = [False]
+        Biass = [True,False]
         Layers = [1,2,3]
         #Layers = [1]
-        #Bidirections = [False, True]
-        Bidirections = [False]
+        Bidirections = [True, False]
+        #Bidirections = [False]
         Sizes = [(1, 1, 1, 1),
                  (1, 1, 4, 4),
                  (1, 3, 4, 4),
