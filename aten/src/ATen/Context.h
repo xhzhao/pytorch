@@ -56,6 +56,7 @@ class CAFFE2_API Context {
     return *generator;
   }
   bool hasMKL() const;
+  bool hasMKLDNN() const;
   bool hasLAPACK() const;
   bool hasMAGMA() const {
     return detail::getCUDAHooks().hasMAGMA();
@@ -109,6 +110,8 @@ class CAFFE2_API Context {
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
+  bool userEnabledMKLDNN() const;
+  void setUserEnabledMKLDNN(bool e);
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 private:
@@ -127,6 +130,7 @@ private:
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
+  bool enabled_mkldnn = true;
   std::atomic<size_t> next_id;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   friend struct Type;
@@ -176,6 +180,10 @@ static inline bool hasCuDNN() {
 
 static inline bool hasMKL() {
   return globalContext().hasMKL();
+}
+
+static inline bool hasMKLDNN() {
+  return globalContext().hasMKLDNN();
 }
 
 static inline bool hasLAPACK() {

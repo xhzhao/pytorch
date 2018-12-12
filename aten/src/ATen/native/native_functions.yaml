@@ -109,6 +109,10 @@
 
 - func: avg_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, bool ceil_mode=false, bool count_include_pad=true) -> Tensor
 
+- func: avg_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false, bool count_include_pad=true) -> Tensor
+
+- func: avg_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[1] padding=0, bool ceil_mode=false, bool count_include_pad=true) -> Tensor
+
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
 
 - func: adaptive_max_pool1d(Tensor self, IntList[1] output_size) -> (Tensor, Tensor)
@@ -1135,6 +1139,27 @@
 - func: mkldnn_convolution_backward_weights(IntList weight_size, Tensor grad_output, Tensor self, IntList padding, IntList stride, IntList dilation, int64_t groups, bool bias_defined) -> (Tensor, Tensor)
 
 - func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
+
+- func: mkldnn_relu(Tensor self) -> Tensor
+  variants: function
+
+- func: mkldnn_relu_(Tensor self) -> Tensor
+  variants: function
+
+- func: mkldnn_relu_backward(Tensor self, Tensor grad_output) -> Tensor
+  variants: function
+
+- func: mkldnn_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double exponential_average_factor, double epsilon) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: mkldnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, Tensor save_mean, Tensor save_var, double epsilon, bool training) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: mkldnn_pooling(Tensor input, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode=false, bool count_include_pad=true, bool avg=false) -> (Tensor, Tensor)
+  variants: function
+
+- func: mkldnn_pooling_backward(Tensor input, Tensor grad_output, Tensor indice, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad, bool avg) -> Tensor
+  variants: function
 
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double exponential_average_factor, double epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:

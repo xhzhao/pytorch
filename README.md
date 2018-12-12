@@ -158,11 +158,12 @@ The details of the patch can be found out [here](https://support.microsoft.com/e
 
 On Linux
 ```bash
+# In case using conda virtual environment, point this to corresponding virtual env directory
+# e.g. export CMAKE_PREFIX_PATH=/home/user/anaconda/env/virtual_env_name/
 export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
 
 # Install basic dependencies
 conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
-conda install -c mingfeima mkldnn
 
 # Add LAPACK support for the GPU
 conda install -c pytorch magma-cuda92 # or [magma-cuda80 | magma-cuda91] depending on your cuda version
@@ -180,7 +181,7 @@ conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
 ```
 #### Get the PyTorch source
 ```bash
-git clone --recursive https://github.com/pytorch/pytorch
+git clone --recursive https://github.com/intel/pytorch
 cd pytorch
 ```
 
@@ -209,6 +210,40 @@ set "CUDAHOSTCXX=%VS140COMNTOOLS%\..\..\VC\bin\amd64\cl.exe"
 call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
 python setup.py install
 ```
+### Intel Optimization
+**Installation**: Currently, PyTorch can be installed via different channels, such as *conda*, *pip* and *docker*. Binary distribution is not enabled with MKLDNN at the moment. To get MKLDNN enabled version, build from source following [Installation](https://github.com/intel/pytorch#installation) above.
+
+**Schedule**: Optimization project is model driven, the current focus is **OpenNMT**, **DeepSpeech2**, **ResNet50**.
+
+**torchvision**: install torchvision from conda would pre-install pytorch from conda, so need to install torchvision from pip in case pytorch is installed from source code build.
+```python
+pip install torchvision
+```
+
+**ICC**: Master branch doesn't have *icc* support at the moment, *icc* support is working in progress.
+
+For more information such as performance data, release plan, please visit [IntelPyTorchWiki](https://wiki.ith.intel.com/display/DL/Intel+PyTorch)
+
+Please note that the optimization is still working in progress so current benchmark performance is suboptimal.
+Contact [Ma Mingfei](mingfei.ma@intel.com) if have any issues with Intel-PyTorch.
+
+### BKM on Xeon
+By default, PyTorch will find any available MPI library during installation. 
+In order to compile against Intel MPI, add corresponding environment variables before installation.
+```bash
+source /opt/intel/compilers_and_libraries/linux/mpi/bin64/mpivars.sh
+```
+PyTorch spawns different sets of OpenMP threads for forward path and backward path, so addtional control over OpenMP is needed to run CPU effcienctly. Set `OMP_NUM_THREADS` to be the number of physical cores. Take Xeon Skylake 8180 as an example, the machine has 2 sockets with 28 cores per socket.
+```bash
+# for Xeon Skylake 8180
+export OMP_NUM_THREADS=56
+export KMP_BLOCKTIME=1
+export KMP_AFFINITY=granularity=fine,compact,1,0
+```
+Currently, we use the following benchmarks for tracking CNN and RNN performance, data on Xeon Skylake 8180 is also available.
+* [convnet-benchmarks](https://github.com/mingfeima/convnet-benchmarks)
+* [DeepSpeech2](https://github.com/mingfeima/deepspeech.pytorch)
+* [OpenNMT](https://github.com/mingfeima/OpenNMT-py)
 
 ### Docker image
 

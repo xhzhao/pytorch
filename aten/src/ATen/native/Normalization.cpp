@@ -262,6 +262,11 @@ Tensor batch_norm(
                         training, momentum, eps));
   }
 
+  bool use_mkldnn = (input.type().backend() == at::Backend::CPU
+               && input.type().scalarType() == at::kFloat
+               && (input.ndimension() == 4 || input.ndimension() == 5)
+               );
+
   bool use_miopen = (input.is_cuda()
                && input.dim() <= MIOPEN_DIM_MAX
                && input.type().scalarType() != at::kDouble
@@ -279,6 +284,13 @@ Tensor batch_norm(
                         running_var.defined() ? running_var.contiguous() : running_var,
                         training, momentum, eps));
   }
+
+#if AT_MKLDNN_ENABLED()
+  if (use_mkldnn) {
+    return std::get<0>(at::mkldnn_batch_norm(input, weight, bias,
+      running_mean, running_var, training, momentum, eps));
+  }
+#endif
 
   return std::get<0>(at::native_batch_norm(input, weight, bias,
                                            running_mean, running_var, training, momentum, eps));

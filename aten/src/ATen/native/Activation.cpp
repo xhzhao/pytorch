@@ -6,19 +6,39 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 
+#include "ATen/Config.h"
 
 namespace at { namespace native {
 
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
+bool use_mkldnn(const at::Tensor& input) {
+#if AT_MKLDNN_ENABLED()
+  return (input.type().backend() == at::Backend::CPU) &&
+         (input.type().scalarType() == kFloat) && // only on CPU Float Tensor
+         (input.ndimension() == 4 || input.ndimension() == 5); // must be in NCHW or NCDHW format
+#endif
+  return false;
+}
+
 DEFINE_DISPATCH(threshold_stub);
 
 Tensor relu(const Tensor & self) {
+  if (use_mkldnn(self)) {
+  #if AT_MKLDNN_ENABLED()
+    return at::mkldnn_relu(self);
+  #endif
+  }
   return at::threshold(self, 0, 0);
 }
 
 Tensor & relu_(Tensor & self) {
+  if (use_mkldnn(self)) {
+  #if AT_MKLDNN_ENABLED()
+    return at::mkldnn_relu_(self);
+  #endif
+  }
   return at::threshold_(self, 0, 0);
 }
 
