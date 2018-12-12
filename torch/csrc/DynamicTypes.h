@@ -5,8 +5,8 @@
 #include "torch/csrc/python_headers.h"
 
 #include <ATen/Device.h>
-#include <c10/core/ScalarType.h>
-#include <c10/core/Backend.h>
+#include <ATen/core/ScalarType.h>
+#include <ATen/core/Backend.h>
 
 #include <memory>
 #include <string>
@@ -14,11 +14,8 @@
 struct THPDtype;
 struct THPLayout;
 
-namespace c10 {
-struct Storage;
-}
-
 namespace at {
+struct Storage;
 struct Type;
 } // namespace at
 

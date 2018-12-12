@@ -1,6 +1,6 @@
 #pragma once
 
-#include <THD/base/ChannelUtils.hpp>
+#include "../ChannelUtils.hpp"
 #include "gloo/rendezvous/store.h"
 
 #include <memory>

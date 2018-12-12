@@ -13,6 +13,12 @@
 #include "generic/THTensor.h"
 #include "THGenerateHalfType.h"
 
+#include "generic/THTensorCopy.h"
+#include "THGenerateAllTypes.h"
+
+#include "generic/THTensorCopy.h"
+#include "THGenerateHalfType.h"
+
 /* random numbers */
 #include "THRandom.h"
 #include "generic/THTensorRandom.h"

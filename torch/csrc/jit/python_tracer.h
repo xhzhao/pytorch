@@ -18,7 +18,6 @@ std::shared_ptr<Graph> createGraphByTracing(
     py::function func,
     Stack inputs,
     py::function var_name_lookup_fn,
-    bool force_outplace,
     c10::optional<size_t> num_real_inputs = {});
 } // namespace tracer
 

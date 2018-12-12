@@ -1,7 +1,7 @@
 
 #include "GLImage.h"
 #include "arm_neon_support.h"
-#include <c10/util/typeid.h>
+#include "caffe2/core/typeid.h"
 
 namespace caffe2 {
 CAFFE_KNOWN_TYPE(GLImage<float>);

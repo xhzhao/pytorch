@@ -26,12 +26,6 @@ static inline std::vector<Value*> toValues(Graph& g, at::ArrayRef<NamedValue> nv
 // that separates their behavior from the AST -> IR converter itself.
 // This allows us to keep dependencies on python minimal.
 
-enum NoneStatus {
- ALWAYS,
- MAYBE,
- NEVER
-};
-
 struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   // what is this node? for error reporting (e.g. Module, python function)
   virtual std::string kind() const = 0;
@@ -45,9 +39,6 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   // select an attribute on it, e.g. `this.field`
   virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) {
     throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
-  }
-  virtual NoneStatus isNone() {
-    return NEVER;
   }
 
   // use it as a vector of values, e.g. a tuple of values as return value from
@@ -98,14 +89,6 @@ struct TORCH_API SimpleValue : public SugaredValue {
   }
   Value * asValue(SourceRange range, Method & m) override {
     return value;
-  }
-  NoneStatus isNone() override {
-    if (value->mustBeNone())
-      return ALWAYS;
-    else if (value->type()->cast<OptionalType>())
-      return MAYBE;
-    else
-      return NEVER;
   }
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       SourceRange loc,
@@ -187,14 +170,14 @@ inline std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Met
 }
 
 TORCH_API void defineMethodsInModule(
-  std::shared_ptr<Module> m,
+  Module & m,
   const std::vector<Def>& definitions,
   const std::vector<Resolver>& resolvers, /* determines how we handle free variables in each definition*/
   std::shared_ptr<SugaredValue> self /* if non-null, the first argument to each def, is bound to this value */
 );
 
 // same as above but parse the definitions from source
-TORCH_API void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source, Resolver resolver, std::shared_ptr<SugaredValue> self);
+TORCH_API void defineMethodsInModule(Module & m, const std::string& source, Resolver resolver, std::shared_ptr<SugaredValue> self);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
@@ -237,7 +220,7 @@ TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   std::ostream& failure_messages,
-  bool allow_conversions);
+  bool convert_tensors_to_nums);
 
 TORCH_API Value* emitBuiltinCall(
   const SourceRange& loc,
@@ -249,10 +232,6 @@ TORCH_API Value* emitBuiltinCall(
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
   // otherwise it will return nullptr if the builtin is not found.
   bool required);
-
-TORCH_API c10::optional<size_t> findInputWithName(
-  const std::string& name,
-  at::ArrayRef<NamedValue> kwargs);
 
 } // namespace script
 } // namespace jit

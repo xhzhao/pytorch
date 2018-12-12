@@ -88,13 +88,11 @@ void THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dime
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
-  WelfordData<accreal, scalar_t> init;
-  init.reset();
   if (!THC_reduceDim<scalar_t>(state, self_, src,
                            ModifyWelford<WelfordData<accreal, scalar_t>>{},
                            ReduceWelford<accreal, scalar_t>{},
                            VarianceWelford<accreal, scalar_t>{biased, true},
-                           init,
+                           WelfordData<accreal, scalar_t>{},
                            dimension,
                            keepdim)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -107,13 +105,11 @@ void THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dime
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
-  WelfordData<accreal, scalar_t> init;
-  init.reset();
   if (!THC_reduceDim<scalar_t>(state, self_, src,
                            ModifyWelford<WelfordData<accreal, scalar_t>>{},
                            ReduceWelford<accreal, scalar_t>{},
                            VarianceWelford<accreal, scalar_t>{biased, false},
-                           init,
+                           WelfordData<accreal, scalar_t>{},
                            dimension,
                            keepdim)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);

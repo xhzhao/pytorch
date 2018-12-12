@@ -190,8 +190,6 @@ def _tensor_str(self, indent):
         return '[]'
 
     summarize = self.numel() > PRINT_OPTS.threshold
-    if self.dtype is torch.float16:
-        self = self.float()
     formatter = _Formatter(get_summarized_data(self) if summarize else self)
     return _tensor_str_with_formatter(self, indent, formatter, summarize)
 
@@ -222,12 +220,12 @@ def get_summarized_data(self):
         else:
             return self
     if self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        start = [self[i] for i in range(0, PRINT_OPTS.edgeitems)]
-        end = ([self[i]
+        start = [get_summarized_data(self[i]).reshape(-1) for i in range(0, PRINT_OPTS.edgeitems)]
+        end = ([get_summarized_data(self[i]).reshape(-1)
                for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
-        return torch.stack([get_summarized_data(x) for x in (start + end)])
+        return torch.cat((start + end))
     else:
-        return torch.stack([get_summarized_data(x) for x in self])
+        return self
 
 
 def _str(self):

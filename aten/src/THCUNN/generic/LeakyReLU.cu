@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/LeakyReLU.cu"
 #else
 
-#include <THCUNN/common.h>
+#include "../common.h"
 
 void THNN_(LeakyReLU_updateOutput)(
            THCState *state,

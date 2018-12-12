@@ -1,9 +1,10 @@
 #include <ATen/core/TensorOptions.h>
 
 #include <c10/Device.h>
-#include <c10/core/Layout.h>
-#include <c10/core/ScalarType.h>
-#include <c10/util/Optional.h>
+#include <ATen/core/Layout.h>
+#include <ATen/core/OptionsGuard.h>
+#include <ATen/core/ScalarType.h>
+#include "c10/util/Optional.h"
 
 #include <iostream>
 

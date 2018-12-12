@@ -222,14 +222,30 @@ THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   return &(state->resourcesPerDevice[device]);
 }
 
-// TODO: delete me
-cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
-  return at::cuda::getCurrentCUDAStream(device).stream();
+THCStream* THCState_getStreamOnDevice(THCState* state, int device) {
+  return at::cuda::detail::CUDAStream_getCurrentStream(device);
 }
 
-// TODO: delete me
+void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream) {
+  at::cuda::detail::CUDAStream_setStream(stream);
+}
+
+THC_API void THCState_setStream(THCState *state, THCStream* stream) {
+  at::cuda::detail::CUDAStream_setStream(stream);
+}
+
+cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
+  return at::cuda::detail::CUDAStream_stream(
+    at::cuda::detail::CUDAStream_getCurrentStream(device));
+}
+
 cudaStream_t THCState_getCurrentStream(THCState *state) {
-  return at::cuda::getCurrentCUDAStream().stream();
+  return at::cuda::detail::CUDAStream_stream(
+    at::cuda::detail::CUDAStream_getCurrentStream());
+}
+
+THCStream* THCState_getStream(THCState *state) {
+  return at::cuda::detail::CUDAStream_getCurrentStream();
 }
 
 cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
@@ -420,7 +436,8 @@ at::DataPtr THCudaHostAlloc(THCState *state, size_t size)
 
 void THCudaHostRecord(THCState *state, void *ptr) {
   if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
-    THCCachingHostAllocator_recordEvent(ptr, at::cuda::getCurrentCUDAStream());
+    THCStream* stream = THCState_getStream(state);
+    THCCachingHostAllocator_recordEvent(ptr, stream);
   }
 }
 

@@ -54,11 +54,7 @@ void addInputs(Node *n, const char * name, const c10::optional<at::Scalar>& valu
   if(value) {
     detail::genericAddInput(n, *value);
   } else {
-    Graph * g = n->owningGraph();
-    Value* none =
-        g->insertNode(g->createNone(NumberType::get()))
-            ->output();
-    n->addInput(none);
+    detail::genericAddInput(n, IValue());
   }
 }
 void addInputs(Node *n, const char * name, const std::string& value) { detail::genericAddInput(n, value); }
@@ -73,7 +69,10 @@ void addInputs(Node *n, const char * name, at::Generator * value)            {
   n->addInput(undef_gen);
 }
 void addInputs(Node *n, const char * name, at::Device value) {
-  detail::genericAddInput(n, value);
+  std::vector<int64_t> device = {
+      static_cast<int64_t>(value.type()),
+      static_cast<int64_t>(value.index())};
+  detail::genericAddInput(n, std::move(device));
 }
 void addInputs(Node *n, const char * name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));

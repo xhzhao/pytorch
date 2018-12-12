@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/SpatialAdaptiveAveragePooling.cu"
 #else
 
-#include <THCUNN/common.h>
+#include "../common.h"
 
 // 4d tensor B x D x H x W
 

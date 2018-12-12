@@ -16,7 +16,7 @@ struct IODescriptor {
     VariableMetadata(const autograd::Variable& var)
       : sizes(var.sizes().vec())
       , type(var.type().scalarType())
-      , device(var.device())
+      , device(var.is_cuda() ? var.get_device() : -1)
       , requires_grad(var.requires_grad()) {}
 
     bool operator==(const VariableMetadata& o) const {
@@ -30,7 +30,7 @@ struct IODescriptor {
 
     std::vector<int64_t> sizes;
     at::ScalarType type;
-    at::Device device;
+    int device;
     bool requires_grad;
   };
 
@@ -62,11 +62,10 @@ struct IODescriptor {
 };
 
 static inline std::ostream& operator<<(std::ostream& out, const IODescriptor::VariableMetadata& meta) {
-  at::Device meta_device = meta.device;
-  auto & t = at::getNonVariableType(meta_device.is_cpu() ? at::Backend::CPU : at::Backend::CUDA, meta.type);
+  auto & t = at::getNonVariableType(meta.device < 0 ? at::Backend::CPU : at::Backend::CUDA, meta.type);
   out << t << "(requires_grad=" << meta.requires_grad;
-  if (meta_device.is_cuda()) {
-    out << ", device=" << meta_device.index();
+  if (meta.device > 0) {
+    out << ", device=" << meta.device;
   }
   out << ") {";
   for(size_t i = 0; i < meta.sizes.size(); ++i) {

@@ -9,8 +9,10 @@ from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
+    nchw2nhwc,
+    nhwc2nchw,
 )
-from hypothesis import assume, given
+from hypothesis import given
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -54,7 +56,8 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
-        assume(group == 1 or dilation == 1)
+        if group > 1:
+            dilation = 1
 
         X, W, b = generate_conv_inputs(
             stride,
@@ -173,7 +176,8 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
-        assume(group == 1 or dilation == 1)
+        if group > 1:
+            dilation = 1
 
         X, W, b = generate_conv_inputs(
             stride,

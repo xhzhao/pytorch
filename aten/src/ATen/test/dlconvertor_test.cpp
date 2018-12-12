@@ -6,10 +6,11 @@
 #include <iostream>
 #include <string.h>
 #include <sstream>
+#include "test_seed.h"
 
 using namespace at;
 TEST(TestDlconvertor, TestDlconvertor) {
-  manual_seed(123);
+  manual_seed(123, at::kCPU);
 
   Tensor a = rand({3, 4});
   DLManagedTensor* dlMTensor = toDLPack(a);

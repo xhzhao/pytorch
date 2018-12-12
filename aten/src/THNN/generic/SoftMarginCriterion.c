@@ -19,7 +19,7 @@ void THNN_(SoftMarginCriterion_updateOutput)(
     return;
   }
 
-  THTensor_(resize0d)(output);
+  THTensor_(resize1d)(output, 1);
 
   scalar_t sum;
 
@@ -31,7 +31,7 @@ void THNN_(SoftMarginCriterion_updateOutput)(
   if (reduction == Reduction::Mean)
     sum /= THTensor_(nElement)(input);
 
-  THTensor_(set0d)(output, sum);
+  THTensor_(set1d)(output, 0, sum);
 }
 
 void THNN_(SoftMarginCriterion_updateGradInput)(

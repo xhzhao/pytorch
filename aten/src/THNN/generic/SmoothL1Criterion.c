@@ -20,7 +20,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
     return;
   }
 
-  THTensor_(resize0d)(output);
+  THTensor_(resize1d)(output, 1);
 
   scalar_t sum = 0;
   TH_TENSOR_APPLY2(scalar_t, input, scalar_t, target,
@@ -31,7 +31,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
   if (reduction == Reduction::Mean)
     sum /= THTensor_(nElement)(input);
 
-  THTensor_(set0d)(output, sum);
+  THTensor_(set1d)(output, 0, sum);
 }
 
 void THNN_(SmoothL1Criterion_updateGradInput)(

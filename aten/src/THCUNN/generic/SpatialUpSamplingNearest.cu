@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/SpatialUpSamplingNearest.cu"
 #else
 
-#include <THCUNN/common.h>
+#include "../common.h"
 
 static inline void THNN_(SpatialUpSamplingNearest_shapeCheck)
                         (THCState *state,

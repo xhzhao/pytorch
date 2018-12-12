@@ -234,11 +234,3 @@ void THPPointer<THTensor>::free() {
     THTensor_free(LIBRARY_STATE ptr);
   }
 }
-
-template<>
-void THPPointer<THPStorage>::free() {
-  if (ptr)
-    Py_DECREF(ptr);
-}
-
-template class THPPointer<THPStorage>;

@@ -2,7 +2,7 @@
 
 namespace at {
 namespace cuda {
-namespace impl {
+namespace detail {
 
 constexpr DeviceType CUDAGuardImpl::static_type;
 

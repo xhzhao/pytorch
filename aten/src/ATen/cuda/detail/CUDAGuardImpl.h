@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/impl/DeviceGuardImplInterface.h>
+#include <c10/detail/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 
 #include <ATen/cuda/Exceptions.h>
@@ -10,14 +10,12 @@
 
 namespace at {
 namespace cuda {
-namespace impl {
+namespace detail {
 
-struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
+struct CUDAGuardImpl final : public c10::detail::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
   CUDAGuardImpl() {}
-  CUDAGuardImpl(DeviceType t) {
-    AT_ASSERT(t == DeviceType::CUDA);
-  }
+  CUDAGuardImpl(DeviceType) {}
   DeviceType type() const override {
     return DeviceType::CUDA;
   }
@@ -42,15 +40,16 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     cudaSetDevice(d.index());
   }
   Stream getStream(Device d) const noexcept override {
-    return at::cuda::getCurrentCUDAStream().unwrap();
+    return CUDAStream(CUDAStream_getCurrentStream(d.index())).unwrap();
   }
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
     CUDAStream cs(s);
-    auto old_stream = at::cuda::getCurrentCUDAStream(s.device().index());
-    at::cuda::setCurrentCUDAStream(cs);
+    // TODO: Don't go through internals if not necessary
+    CUDAStream old_stream(CUDAStream_getCurrentStream(s.device().index()));
+    CUDAStream_setStream(cs.internals());
     return old_stream.unwrap();
   }
 };
 
-}}} // namespace at::cuda::impl
+}}} // namespace at::cuda::detail

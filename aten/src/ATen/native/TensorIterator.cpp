@@ -97,47 +97,21 @@ compute_result_type(at::ArrayRef<OperandInfo> operands, const F& predicate) {
   return std::make_tuple(result_type, backend);
 }
 
-void TensorIterator::compute_types() {
-  bool missing_dtypes = false;
-  for (auto& op : operands_) {
-    if (!op.tensor.defined() && !op.type) {
-      missing_dtypes = true;
-    }
+static bool needs_cast(const Tensor& tensor, const Type& dst_type) {
+  if (!tensor.defined() || dst_type == tensor.type()) {
+    return false;
   }
-
-  if (missing_dtypes || compute_common_dtype_) {
-    auto& type = compute_common_type();
-    for (auto& op : operands_) {
-      if (!op.type) {
-        op.type = &type;
-      } else if (compute_common_dtype_ && op.type != &type) {
-        if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
-            type.device_type() == kCUDA && op.tensor.type().device_type() == kCPU) {
-          // don't cast CPU scalars in CUDA ops that directly support them
-          op.type = &op.tensor.type();
-        } else {
-          op.type = &type;
-        }
-      }
-    }
+  if (dst_type.device_type() == DeviceType::CUDA &&
+      tensor.type().device_type() == DeviceType::CPU &&
+      tensor.dim() == 0) {
+    // zero-dim CPU tensors used in CUDA operations can be used directly without
+    // casting
+    return false;
   }
-
-  for (auto& op : operands_) {
-    if (op.tensor.defined() && op.tensor.type() != *op.type) {
-      if (op.is_output) {
-        AT_ERROR("output with type ", op.tensor.type().toString(),
-                 " doesn't match the desired type ", type().toString());
-      } else if (op.tensor.dim() == 0) {
-        op.tensor = op.tensor.to(*op.type);
-      } else {
-        AT_ERROR("expected type ", type().toString(), " but got ",
-            op.tensor.type().toString());
-      }
-    }
-  }
+  return true;
 }
 
-Type& TensorIterator::compute_common_type() {
+void TensorIterator::compute_common_type() {
   // See [Result type computation] in TensorIterator.h
   auto result_type = ScalarType::Undefined;
   auto backend = Backend::Undefined;
@@ -158,7 +132,18 @@ Type& TensorIterator::compute_common_type() {
   AT_ASSERT(result_type != ScalarType::Undefined);
   AT_ASSERT(backend != Backend::Undefined);
 
-  return at::globalContext().getNonVariableType(backend, result_type);
+  auto& type = at::globalContext().getNonVariableType(backend, result_type);
+
+  for (auto& op : operands_) {
+    if (!op.type) {
+      op.type = &type;
+      op.needs_cast = needs_cast(op.tensor, type);
+      if (op.needs_cast && op.tensor.dim() == 0 && !op.is_output) {
+        op.tensor = op.tensor.toType(type);
+        op.needs_cast = false;
+      }
+    }
+  }
 }
 
 DimVector TensorIterator::compatible_stride(int element_size) const {
@@ -186,7 +171,6 @@ void TensorIterator::allocate_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
     auto& op = operands_[i];
     if (!op.tensor.defined()) {
-      AT_ASSERTM(op.type, "no type for operand", i);
       int element_size = op.type->elementSizeInBytes();
       op.stride_bytes = compatible_stride(element_size);
 
@@ -421,7 +405,7 @@ bool TensorIterator::is_scalar(int arg) const {
 }
 
 bool TensorIterator::is_cpu_scalar(int arg) const {
-  return is_scalar(arg) && operands_[arg].tensor.type().device_type() == kCPU;
+  return is_scalar(arg) && operands_[arg].tensor.type().backend() == at::Backend::CPU;
 }
 
 void* TensorIterator::data_ptr(int arg) const {
@@ -466,7 +450,6 @@ std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Ten
   builder.add_output(out);
   builder.add_input(a);
   builder.add_input(b);
-  builder.iter_->allow_cpu_scalars_ = true;
   return builder.build();
 }
 
@@ -476,7 +459,6 @@ std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Ten
   builder.add_output(out);
   builder.add_input(a);
   builder.iter_->resize_outputs_ = false;
-  builder.iter_->is_reduction_ = true;
   return builder.build();
 }
 
@@ -503,7 +485,7 @@ void TensorIterator::compute_shape() {
     // For now, don't include output tensors that are not also input tensors.
     // This preserves the legacy behavior where torch.add(..., out=dst) resizes
     // the destination tensor.
-    if (resize_outputs_ && op.is_output && !op.is_read_write) continue;
+    if (op.is_output && !op.is_read_write) continue;
 
     auto shape = op.tensor.sizes();
     if (shape_.empty()) {
@@ -519,17 +501,15 @@ void TensorIterator::compute_shape() {
   // outputs.
   for (int i = 0; i < num_outputs_; i++) {
     auto& tensor = operands_[i].tensor;
-    if (tensor.defined() && !tensor.sizes().equals(shape_)) {
-      if (resize_outputs_ && !operands_[i].is_read_write) {
+    if (resize_outputs_ && tensor.defined() && !tensor.sizes().equals(shape_)) {
+      if (!operands_[i].is_read_write) {
         // Preserve legacy resizing behavior of out=... arguments
         // TODO: issue warning
         tensor.resize_(shape_);
         continue;
       }
-      if (!is_reduction_) {
-        AT_ERROR("output with shape ", tensor.sizes(), " doesn't match the broadcast shape ",
-                 shape_);
-      }
+      AT_ERROR("output with shape ", tensor.sizes(), " doesn't match the broadcast shape ",
+               shape_);
     }
   }
 }
@@ -556,6 +536,15 @@ void TensorIterator::compute_strides() {
   for (auto& op : operands_) {
     if (op.tensor.defined()) {
       op.stride_bytes = compute_stride(op.tensor, shape_);
+    }
+  }
+}
+
+void TensorIterator::check_type_conversions() {
+  for (auto& op : operands_) {
+    if (op.needs_cast) {
+      AT_ERROR("TensorIterator expected type ", type().toString(), " but got ",
+          op.tensor.type().toString());
     }
   }
 }
@@ -623,7 +612,7 @@ std::unique_ptr<TensorIterator> TensorIterator::Builder::build() {
   // re-order dimensions to improve coalescing
   iter_->reorder_dimensions();
   // compute the result dtype and backend
-  iter_->compute_types();
+  iter_->compute_common_type();
   // allocate the output tensor if it's not provided
   iter_->allocate_outputs();
   // coalesce adjacent dimensions when possible
@@ -633,6 +622,8 @@ std::unique_ptr<TensorIterator> TensorIterator::Builder::build() {
     AT_ASSERT(op.tensor.defined());
     op.data = op.tensor.data_ptr();
   }
+
+  iter_->check_type_conversions();
 
   return std::move(iter_);
 }

@@ -69,7 +69,7 @@ def _file_rendezvous_handler(url):
 
     rank = int(query["rank"])
     world_size = int(query["world_size"])
-    store = FileStore(path, world_size)
+    store = FileStore(path)
     yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
@@ -106,29 +106,17 @@ def _env_rendezvous_handler(url):
     def _env_error(var):
         return _error("environment variable %s expected, but not set" % var)
 
-    if not url.startswith("env://"):
+    if url != "env://":
         raise _error("url must be equal to `env://`")
-    result = urlparse(url)
-    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
-
-    if "rank" in query:
-        rank = int(query["rank"])
-    else:
-        rank = os.environ.get("RANK", None)
-        if rank is None:
-            raise _env_error("RANK")
-
-    if "world_size" in query:
-        world_size = int(query["world_size"])
-    else:
-        world_size = os.environ.get("WORLD_SIZE", None)
-        if world_size is None:
-            raise _env_error("WORLD_SIZE")
-
+    world_size = os.environ.get("WORLD_SIZE", None)
+    if world_size is None:
+        raise _env_error("WORLD_SIZE")
+    rank = os.environ.get("RANK", None)
+    if rank is None:
+        raise _env_error("RANK")
     master_addr = os.environ.get("MASTER_ADDR", None)
     if master_addr is None:
         raise _env_error("MASTER_ADDR")
-
     master_port = os.environ.get("MASTER_PORT", None)
     if master_port is None:
         raise _env_error("MASTER_PORT")

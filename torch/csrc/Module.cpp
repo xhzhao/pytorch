@@ -29,7 +29,6 @@
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
 #include "torch/csrc/autograd/python_legacy_variable.h"
 #include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/multiprocessing/init.h"
 #include "torch/csrc/tensor/python_tensor.h"
 #include "torch/csrc/utils/tensor_dtypes.h"
 #include "torch/csrc/utils/python_strings.h"
@@ -224,18 +223,6 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
           "method '%s' already has a docstring", m->d_method->ml_name);
     }
     m->d_method->ml_doc = doc_str;
-  } else if (strcmp(Py_TYPE(obj)->tp_name, "getset_descriptor") == 0) {
-    //NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
-    PyGetSetDescrObject* m = (PyGetSetDescrObject *)obj;
-    if (m->d_getset->doc) {
-      //NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
-      return PyErr_Format(PyExc_RuntimeError,
-          "attribute '%s' already has a docstring", m->d_getset->name);
-    }
-    // This field is not const for python < 3.7 yet the content is
-    // never modified.
-    //NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    m->d_getset->doc = const_cast<char *>(doc_str);
   } else {
     return PyErr_Format(PyExc_TypeError,
         "don't know how to add docstring to type '%s'", Py_TYPE(obj)->tp_name);
@@ -522,11 +509,7 @@ static void warning_handler(
   }
 }
 
-
-#ifdef _WIN32
-__declspec(dllexport)
-#endif
-PyObject* initModule() {
+static PyObject* initModule() {
   HANDLE_TH_ERRORS
   THInferNumThreads();
 
@@ -535,7 +518,6 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, TorchMethods);
   THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
   THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
-  THPUtils_addPyMethodDefs(methods, torch::multiprocessing::python_functions());
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
@@ -677,3 +659,16 @@ struct call_duplicate_guard {
 };
 
 static call_duplicate_guard _call_duplicate_guard;
+
+#if PY_MAJOR_VERSION == 2
+PyMODINIT_FUNC init_C()
+#else
+PyMODINIT_FUNC PyInit__C()
+#endif
+{
+#if PY_MAJOR_VERSION == 2
+  initModule();
+#else
+  return initModule();
+#endif
+}

@@ -13,7 +13,7 @@
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <c10/util/ArrayRef.h>
+#include <ATen/core/ArrayRef.h>
 #include "c10/util/Optional.h"
 
 #include <functional>
@@ -39,15 +39,12 @@ namespace torch { namespace jit { namespace script {
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
 
-struct Module;
-
 struct Method {
-  Method(Module* owner, std::string name, bool optimize,
+  Method(std::string name, bool optimize,
          std::shared_ptr<Graph> graph,
          std::vector<at::Tensor*> initial_members,
          std::function<void(Method&)> method_creator)
-  : owner_(owner)
-  , name_(std::move(name))
+  : name_(std::move(name))
   , graph_(std::move(graph))
   , optimize(optimize)
   , member_inputs(std::move(initial_members))
@@ -81,11 +78,11 @@ struct Method {
     }
     return get_executor().graphFor(inputs);
   }
-  TORCH_API std::shared_ptr<Graph> graph() const {
+  std::shared_ptr<Graph> graph() const {
     return graph_;
   }
 
-  TORCH_API const std::string & name() const {
+  const std::string & name() const {
     return name_;
   }
   // emit a function call by inlining the callees Graph into this one
@@ -95,13 +92,13 @@ struct Method {
   std::vector<Value*> emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
 
   // if this isn't yet defined, run its method_creator function
-  TORCH_API void ensure_defined();
+  void ensure_defined();
 
 
   size_t num_inputs() const {
     return graph()->inputs().size() - member_inputs.size();
   }
-  TORCH_API Value * get_or_add_parameter(at::Tensor* slot) {
+  Value * get_or_add_parameter(at::Tensor* slot) {
     auto it = member_input_index.find(slot);
     if(it != member_input_index.end()) {
       return graph()->inputs().at(it->second);
@@ -124,7 +121,7 @@ struct Method {
     }
     const auto size = stack.size();
     setInputTypes(*retval, ArgumentSpec(with_grad, std::move(stack), size));
-    PropagateInputShapes(retval);
+    PropagateInputShapes(*retval);
     return retval;
   }
 
@@ -135,26 +132,26 @@ struct Method {
     }
     if (propagate) {
       setInputTypes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
-      PropagateInputShapes(retval);
+      PropagateInputShapes(*retval);
     }
     JIT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i=0; i < retval->inputs().size(); ++i) {
       auto scalar_type = inputs[i].type().scalarType();
       auto sizes = inputs[i].sizes();
-      auto type = torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
       retval->inputs()[i]->setType(type);
     }
     JIT_ASSERT(retval->outputs().size() == outputs.size());
     for (size_t i=0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
-      auto type = torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
       retval->outputs()[i]->setType(type);
     }
     return retval;
   }
 
-  std::vector<at::Tensor*> params() const {
+  std::vector<at::Tensor*> params() {
     return member_inputs;
   }
 
@@ -163,7 +160,7 @@ struct Method {
     return *this;
   }
 
-  TORCH_API const FunctionSchema& getSchema() const {
+  const FunctionSchema& getSchema() const {
     if(schema == nullptr) {
       schema = make_unique<FunctionSchema>(defaultSchemaFor(*this));
     }
@@ -185,13 +182,8 @@ struct Method {
     return get_executor().debugDisableAutodiffSubgraphInlining();
   }
 
-  bool is_optimized() const {
+  bool is_optimized() {
     return optimize;
-  }
-
-  // the module that contains this method.
-  Module& owner() const {
-    return *owner_;
   }
 
 private:
@@ -211,6 +203,10 @@ private:
     }
     return { method.name(), std::move(args), std::move(returns) };
   }
+
+  std::string name_;
+  std::shared_ptr<Graph> graph_; // for debugging and for inlining
+  bool optimize;
 
   GraphExecutor& get_executor() {
     std::call_once(executor_init, [&]{
@@ -246,15 +242,6 @@ private:
       }
     }
   }
-
-
-  // Methods are uniqued onwed by a single module. This raw pointer allows
-  // looking up the module.
-  Module* owner_;
-
-  std::string name_;
-  std::shared_ptr<Graph> graph_; // for debugging and for inlining
-  bool optimize;
 
   GraphExecutor executor; // for execution
   // member_inputs are a list of additional arguments appended to graph that are
@@ -329,10 +316,6 @@ struct Module {
     optimize = o;
   }
 
-  bool is_optimized() const {
-    return optimize;
-  }
-
   IValue forward(std::vector<IValue> inputs) {
     return get_method("forward")(inputs);
   }
@@ -351,12 +334,12 @@ struct Module {
 
   Method& create_method(const std::string & name, std::shared_ptr<Graph> graph, std::vector<at::Tensor*> member_inputs) {
     JIT_ASSERT(graph);
-    std::unique_ptr<Method> method(new Method(this, name, optimize, std::move(graph), std::move(member_inputs), nullptr));
+    std::unique_ptr<Method> method(new Method(name, optimize, std::move(graph), std::move(member_inputs), nullptr));
     return *methods.insert(name, std::move(method));
   }
 
   Method& create_method(const std::string & name, std::function<void(Method&)> creator) {
-    std::unique_ptr<Method> method(new Method(this, name, optimize, std::make_shared<Graph>(), {}, creator));
+    std::unique_ptr<Method> method(new Method(name, optimize, std::make_shared<Graph>(), {}, creator));
     return *methods.insert(name, std::move(method));
   }
 

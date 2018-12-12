@@ -6,12 +6,9 @@
 // Example:
 //   using accscalar_t = acc_type<scalar_t, true>;
 
-#if defined(__CUDACC__)
+#ifdef __CUDACC__
 #include <cuda.h>
 #include <cuda_fp16.h>
-#elif defined(__HIPCC__)
-#include <hip/hip_runtime.h>
-#include <hip/hip_fp16.h>
 #endif
 
 namespace at {
@@ -19,7 +16,7 @@ namespace at {
 template <typename T, bool is_cuda>
 struct AccumulateType { };
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
+#ifdef __CUDACC__
 template <> struct AccumulateType<half, true> { using type = float; };
 #endif
 template <> struct AccumulateType<Half, true> { using type = float; };

@@ -157,7 +157,7 @@ static void EnsureNoTuples(Block* block) {
 
 void LowerAllTuples(std::shared_ptr<Graph>& graph) {
   LowerAllTuples(graph->block());
-  EliminateDeadCode(graph->block());
+  EliminateDeadCode(graph);
   EnsureNoTuples(graph->block());
 }
 

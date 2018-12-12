@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/TemporalUpSamplingNearest.cu"
 #else
 
-#include <THCUNN/common.h>
+#include "../common.h"
 
 static inline void THNN_(TemporalUpSamplingNearest_shapeCheck)
                         (THCState *state,

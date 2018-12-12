@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/VolumetricAdaptiveMaxPooling.cu"
 #else
 
-#include <THCUNN/common.h>
+#include "../common.h"
 
 // 5d tensor B x D x T x H x W
 

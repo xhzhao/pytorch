@@ -7,6 +7,15 @@
 #else
 #define GENERATE_SPARSE 1
 #endif
+
+template<>
+void THPPointer<THPStorage>::free() {
+  if (ptr)
+    Py_DECREF(ptr);
+}
+
+template class THPPointer<THPStorage>;
+
 #undef GENERATE_SPARSE
 
 #endif

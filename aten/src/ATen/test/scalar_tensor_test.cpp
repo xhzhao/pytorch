@@ -1,6 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "ATen/ATen.h"
+#include "test_seed.h"
 #include <algorithm>
 #include <iostream>
 #include <numeric>
@@ -268,12 +269,12 @@ void test(Type &T) {
 }
 
 TEST(TestScalarTensor, TestScalarTensorCPU) {
-  manual_seed(123);
+  manual_seed(123, at::kCPU);
   test(CPU(kFloat));
 }
 
 TEST(TestScalarTensor, TestScalarTensorCUDA) {
-  manual_seed(123);
+  manual_seed(123, at::kCUDA);
 
   if (at::hasCUDA()) {
     test(CUDA(kFloat));

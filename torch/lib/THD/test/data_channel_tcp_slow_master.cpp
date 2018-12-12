@@ -1,4 +1,4 @@
-#include <THD/base/data_channels/DataChannelTCP.hpp>
+#include "../base/data_channels/DataChannelTCP.hpp"
 #include "TestUtils.hpp"
 
 #include <THPP/tensors/THTensor.hpp>

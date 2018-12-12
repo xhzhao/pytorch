@@ -3,7 +3,6 @@
 #include "tree.h"
 #include "tree_views.h"
 #include "c10/util/Optional.h"
-#include "torch/csrc/jit/script/parse_string_literal.h"
 
 namespace torch {
 namespace jit {
@@ -32,7 +31,7 @@ inline Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl, bool
     new_params.push_back(old[0]);
   }
   for (; i < decl.params().size(); ++i, ++j) {
-    new_params.emplace_back(old[i].withType(_new[j].type()));
+    new_params.push_back(Param::create(old[i].range(), old[i].ident(), _new[j].type()));
   }
   return Decl::create(decl.range(), List<Param>::create(decl.range(), new_params), type_annotation_decl.return_type());
 }
@@ -123,7 +122,7 @@ struct Parser {
         prefix = ListLiteral::create(list.range(), List<Expr>(list));
       } break;
       case TK_STRINGLITERAL: {
-        prefix = parseConcatenatedStringLiterals();
+        prefix = parseStringLiteral();
       } break;
       default: {
         Ident name = parseIdent();
@@ -237,12 +236,80 @@ struct Parser {
     return Const::create(t.range, t.text());
   }
 
-  StringLiteral parseConcatenatedStringLiterals() {
+  bool isCharCount(char c, const std::string& str, size_t start, int len) {
+    //count checks from [start, start + len)
+    return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len;
+  }
+
+  static bool isOctal(char c) {
+    return c >= '0' && c < '8';
+  }
+
+  c10::optional<char> parseOctal(const std::string& str, size_t pos) {
+    if (pos + 3 >= str.size())
+      return c10::nullopt;
+    size_t c = 0;
+    for(size_t i = 0, b = 64; i < 3; ++i, b /= 8) {
+      c += b * (str[pos + i] - '0');
+    }
+    if(c >= 256)
+      return c10::nullopt;
+    return c;
+  }
+  std::string parseString(const SourceRange& range, const std::string &str) {
+    int quote_len = isCharCount(str[0], str, 0, 3) ? 3 : 1;
+    auto ret_str = str.substr(quote_len, str.size() - quote_len * 2);
+    size_t pos = ret_str.find('\\');
+    while(pos != std::string::npos) {
+      //invariant: pos has to escape a character because it is a valid string
+      char c = ret_str[pos + 1];
+      size_t to_erase = 2;
+      switch (ret_str[pos + 1]) {
+        case '\\':
+        case '\'':
+        case '\"':
+        case '\n':
+          break;
+        case 'a':
+          c = '\a';
+          break;
+        case 'b':
+          c = '\b';
+          break;
+        case 'f':
+          c = '\f';
+          break;
+        case 'n':
+          c = '\n';
+          break;
+        case 'v':
+          c = '\v';
+          break;
+        case 'h':
+          throw ErrorReport(range)
+              << "unsupported hex specifier";
+        default:
+          // \0NN
+          if (auto v = parseOctal(str, pos)) {
+            to_erase = 4;
+            c = *v;
+          } else {
+            throw ErrorReport(range)
+                << " ill formed octal specifier";
+          }
+      }
+      ret_str.replace(pos, to_erase, /* num copies */ 1, c);
+      pos = ret_str.find('\\', pos + 1);
+    }
+    return ret_str;
+  }
+
+  StringLiteral parseStringLiteral() {
     auto range = L.cur().range;
     std::stringstream ss;
     while(L.cur().kind == TK_STRINGLITERAL) {
       auto literal_range = L.cur().range;
-      ss << parseStringLiteral(literal_range, L.next().text());
+      ss << parseString(literal_range, L.next().text());
     }
     return StringLiteral::create(range, ss.str());
   }
@@ -302,18 +369,12 @@ struct Parser {
     } else {
       type = Var::create(L.cur().range, Ident::create(L.cur().range, "Tensor"));
     }
-    TreeRef def;
-    if (L.nextIf('=')) {
-      def = Maybe<Expr>::create(L.cur().range, parseExp());
-    } else {
-      def = Maybe<Expr>::create(L.cur().range);
-    }
-    return Param::create(type->range(), Ident(ident), Expr(type), Maybe<Expr>(def));
+    return Param::create(type->range(), Ident(ident), Expr(type));
   }
 
   Param parseBareTypeAnnotation() {
     auto type = parseExp();
-    return Param::create(type.range(), Ident::create(type.range(), ""), type, Maybe<Expr>::create(type.range()));
+    return Param::create(type.range(), Ident::create(type.range(), ""), type);
   }
 
   TreeRef parseTypeComment(bool parse_full_line=false) {
@@ -457,13 +518,15 @@ struct Parser {
 
   TreeRef parseStatements(bool expect_indent=true) {
     auto r = L.cur().range;
-    if (expect_indent) {
+    if (expect_indent)
       L.expect(TK_INDENT);
-    }
     TreeList stmts;
-    do {
-      stmts.push_back(parseStmt());
-    } while(!L.nextIf(TK_DEDENT));
+    for (size_t i=0; ; ++i) {
+      auto stmt = parseStmt();
+      stmts.push_back(stmt);
+      if (L.nextIf(TK_DEDENT))
+        break;
+    }
     return c(TK_LIST, r, std::move(stmts));
   }
   Decl parseDecl() {

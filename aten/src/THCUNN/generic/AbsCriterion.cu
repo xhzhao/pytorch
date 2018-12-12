@@ -19,7 +19,7 @@ void THNN_(AbsCriterion_updateOutput)(
     return;
   }
 
-  THCTensor_(resize0d)(state, output);
+  THCTensor_(resize1d)(state, output, 1);
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
 
@@ -36,7 +36,7 @@ void THNN_(AbsCriterion_updateOutput)(
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, target);
 
-  THCTensor_(set0d)(state, output, ScalarConvert<accreal, scalar_t>::to(sum));
+  THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, scalar_t>::to(sum));
 }
 
 void THNN_(AbsCriterion_updateGradInput)(
@@ -73,7 +73,7 @@ void THNN_(AbsCriterion_updateGradInput)(
   thrust::device_ptr<scalar_t> gradInput_data(THCTensor_(data)(state, gradInput));
 
   thrust::transform(input_data, input_data+size, target_data, gradInput_data,
-                    abs_updateGradInput_functor<scalar_t>(norm, THCTensor_(get0d)(state, gradOutput)));
+                    abs_updateGradInput_functor<scalar_t>(norm, THCTensor_(get1d)(state, gradOutput, 0)));
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, target);

@@ -28,13 +28,16 @@ static c10::optional<std::vector<int64_t>> getMapSize(
 , at::TensorList args
 , at::IntList arg_subset) {
 
+  int64_t dim_after_broadcast = 0;
+  for (const auto arg_idx : arg_subset) {
+    dim_after_broadcast = std::max(dim_after_broadcast, args[arg_idx].dim());
+  }
   // TODO: this keeps reallocating map_size at every iteration, but we know
   // exactly how much storage do we need, so this could be fixed in-place at
   // every step. We're just missing a few functions for ATen, but the fix
   // should be straightforward.
   // Note: left unitialized since empty shape is broadcastable to any shape
   std::vector<int64_t> map_size;
-  map_size.reserve(8);
   for (const auto arg_idx : arg_subset) {
     auto& arg = args.at(arg_idx);
     auto& chunk_desc = spec.inputChunks().at(arg_idx);
@@ -162,9 +165,19 @@ static void compressContiguous(
 // Output pointers are stored in outputs (to be put on the stack later).
 void launchFusion(
   const FusedKernel& fusion
-, const at::Device device
+, const int device
 , const at::ArrayRef<at::Tensor>& inputs
 , std::vector<at::Tensor>& outputs) {
+  // Allocates tensors for outputs
+  auto& ref_type = inputs[0].type();
+  outputs.reserve(fusion.outputDesc().size());
+  for (const auto& od : fusion.outputDesc()) {
+    if (device >= 0) // GPU
+      outputs.push_back(at::empty({0}, ref_type.options().dtype(od.scalar_type).device_index(device)));
+    else // CPU
+      outputs.push_back(at::empty({0}, ref_type.options().dtype(od.scalar_type).device(at::Device{at::DeviceType::CPU})));
+  }
+
   // Fails if fusion and given inputs disagree
   JIT_ASSERT(inputs.size() == fusion.inputDesc().size());
 
@@ -249,19 +262,17 @@ void launchFusion(
   }
 
   // Adds (flattened) output arguments
-  outputs.reserve(fusion.outputDesc().size());
-  const auto& ref_options = inputs[0].options();
   for (size_t i = 0; i < fusion.outputDesc().size(); ++i) {
     const auto& c = fusion.concatDesc()[i];
+    auto& o = outputs[i];
     if (c.isNoop()) {
-      outputs.push_back(at::empty(map_size, ref_options.dtype(fusion.outputDesc()[i].scalar_type)));
+      o.resize_(map_size);
       addTensorInfo(fusion.outputDesc()[i], outputs[i]);
     } else {
       size_t small_size = map_size[c.dim()];
       std::vector<int64_t> concat_size(map_size.begin(), map_size.end());
       concat_size[c.dim()] = small_size * c.nSubTensors();
-      outputs.push_back(at::empty(concat_size, ref_options));
-      const auto& o = outputs[i];
+      o.resize_(concat_size);
       size_t offset = 0;
       for (size_t j = 0; j < c.nSubTensors(); ++j) {
         // because the concatenated_output stays live, the underlying data
@@ -296,17 +307,24 @@ bool runFusion(
 
   // Determines device to dispatch to. If there's a device mismatch in the inputs,
   // we use the fallback (which should give a nice error message).
-  at::Device device = inputs.at(0).device();
+  int32_t device = inputs.at(0).device().index();
   at::ScalarType dtype = inputs[0].type().scalarType();
   for (const auto& t : at::TensorList(inputs).slice(1)) {
-    if (t.device() != device) {
+    if (t.device().index() != device) {
+      return false;
+    }
+    if (t.type().scalarType() != dtype) {
       return false;
     }
   }
 
+  // The codegen only supports float and half inputs at the moment, so bail out
+  // if we see anything else.
+  if (dtype != at::kFloat && dtype != at::kHalf) return false;
+
   // Attempts to run fallback if device fusion is disabled
-  if (device.is_cuda() && !canFuseOnGPU()) return false;
-  if (device.is_cpu() && !canFuseOnCPU()) return false;
+  if (device != kCPUDevice && !canFuseOnGPU()) return false;
+  if (device == kCPUDevice && !canFuseOnCPU()) return false;
 
   // Validates sizes and expands inputs as needed
   auto maybe_map_size = canRunKernel(spec, inputs);
@@ -316,7 +334,7 @@ bool runFusion(
   expandArgs(spec, inputs, *maybe_map_size);
 
   // Retrieves the kernel, compiling (and caching) if necessary
-  ArgSpec arg_spec{inputs, device.index()};
+  ArgSpec arg_spec{inputs, device};
   auto maybe_kernel = spec.findKernel(arg_spec);
   if (!maybe_kernel) {
     const auto kernel = compileKernel(spec, arg_spec, *maybe_map_size, device);

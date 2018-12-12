@@ -4,7 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
-#include <c10/util/typeid.h>
+#include "caffe2/core/typeid.h"
 
 namespace caffe2 {
 

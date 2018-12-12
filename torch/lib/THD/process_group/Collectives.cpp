@@ -1,5 +1,5 @@
 #include "Collectives.hpp"
-#include <THD/base/ChannelUtils.hpp>
+#include "../base/ChannelUtils.hpp"
 #include "General.hpp"
 
 #include <vector>

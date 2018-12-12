@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/RReLU.cu"
 #else
 
-#include <THCUNN/common.h>
+#include "../common.h"
 
 void THNN_(RReLU_updateOutput)(
            THCState *state,

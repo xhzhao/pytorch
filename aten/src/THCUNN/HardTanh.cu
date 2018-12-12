@@ -10,7 +10,9 @@ struct hardtanhupdateOutput_functor
   const T min_val_;
 
   hardtanhupdateOutput_functor(T min_val, T max_val)
-      : max_val_(max_val), min_val_(min_val) {}
+    : min_val_(min_val)
+    , max_val_(max_val)
+  {}
 
   __device__ void operator()(T *output, const T *input) const
   {
@@ -38,7 +40,9 @@ struct hardtanhupdateGradInput_functor
   const T min_val_;
 
   hardtanhupdateGradInput_functor(T min_val, T max_val)
-      : max_val_(max_val), min_val_(min_val) {}
+    : min_val_(min_val)
+    , max_val_(max_val)
+  {}
 
   __device__ void operator()(T *gradInput, const T *input, const T *gradOutput) const
   {

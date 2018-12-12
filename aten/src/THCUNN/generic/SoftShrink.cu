@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/SoftShrink.cu"
 #else
 
-#include <THCUNN/common.h>
+#include "../common.h"
 
 void THNN_(SoftShrink_updateOutput)(
            THCState *state,
