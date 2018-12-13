@@ -194,6 +194,10 @@ static inline bool hasMAGMA() {
   return globalContext().hasMAGMA();
 }
 
+static inline bool userEnabledMKLDNN() {
+  return globalContext().userEnabledMKLDNN();
+}
+
 static inline int64_t current_device() {
   return globalContext().current_device();
 }

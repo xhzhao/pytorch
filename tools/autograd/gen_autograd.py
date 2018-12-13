@@ -64,7 +64,44 @@ VIEW_FUNCTIONS = {
 # of viewing functions, and is used by the JIT to determine when an operator
 # returns a view of its inputs
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'split'})
-
+'''
+=======
+# In principle this should live in derivatives.yaml, but I could not
+# think of a good syntax for it
+HARDCODED_DIFFERENTIABLE_OUTPUTS = {
+    # Suppose that 'foo' is a function for which outputs 0 and 1 are
+    # differentiable, and 2 is not.  Then you would write:
+    # 'foo': (0, 1),
+    '_cudnn_rnn': (0, 1, 2),
+    # _cudnn_rnn outputs:
+    #   0 => output
+    #   1 => hy
+    #   2 => cy
+    #   3 => reserve
+    #   4 => weight_buf
+    '_thnn_fused_lstm_cell': (0, 1),
+    # _thnn_fused_lstm_cell outputs:
+    #   0 => hy
+    #   1 => cy
+    #   2 => workspace
+    'mkldnn_rnn_cell': (0, 1),
+    # mkldnn_rnn_cell outputs:
+    #   0 => hy
+    #   1 => cy
+    #   2 => workspace
+    'mkldnn_rnn_lstm': (0, 1, 2),
+    # mkldnn_rnn outputs:
+    #   0 => y
+    #   1 => hy
+    #   2 => cy
+    #   3 => workspace
+    'mkldnn_rnn': (0),
+    # mkldnn_rnn outputs:
+    #   0 => hy
+    #   1 => workspace
+}
+>>>>>>> rnncell
+'''
 
 def format_return_type(returns):
     if len(returns) == 0:
